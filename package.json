@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-command-centre",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Command Centre for DeepSeek Harness: a cyberpunk mission-control board for every task's progress, subagent tree and output (read-only V1a).",
   "type": "module",
   "exports": {
