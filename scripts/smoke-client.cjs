@@ -549,7 +549,7 @@ tree = expandPanel();
 assert(countClass(tree, 'mc-canvas') === 1, 'canvas container renders');
 assert(countClass(tree, 'mc-node') === 5, 'canvas renders one node per session (3 roots + 2 subagents)');
 assert(countClass(tree, 'mc-edge') === 2, 'canvas renders one edge per parent link');
-assert(countClass(tree, 'mc-cluster') === 3, 'canvas groups each root subtree in a cluster');
+assert(countClass(tree, 'mc-cluster') === 0, 'canvas draws no workspace-like group frames (v0.9.1)');
 const canvasText = render(tree);
 for (const [label, needle] of [['node title', '修复登录超时'], ['subagent node', '定位超时'], ['canvas hint', '拖拽平移'], ['node output', 'OUT 2F']]) {
   assert(canvasText.includes(needle), `canvas ${label} rendered`);
@@ -693,7 +693,7 @@ if (process.env.MC_DUMP) {
     return out;
   };
   console.log('--- CANVAS BOXES ---');
-  console.log(JSON.stringify({ nodes: collect(tree, 'mc-node', []), clusters: collect(tree, 'mc-cluster', []), edges: collect(tree, 'mc-edge', []).length }, null, 1));
+  console.log(JSON.stringify({ nodes: collect(tree, 'mc-node', []), edges: collect(tree, 'mc-edge', []).length }, null, 1));
   console.log('--- CANVAS TEXT ---');
   console.log(canvasTextDump.slice(0, 60).join('\n'));
   console.log('--- DRAWER TEXT ---');

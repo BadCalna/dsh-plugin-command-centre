@@ -877,8 +877,6 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-edge[data-active=true]{stroke:var(--cc-accent);stroke-width:2.3;filter:drop-shadow(0 0 3px var(--cc-glow))}
 .mc-edge[data-active=true][data-live=true]{stroke:var(--mc-run)}
 @keyframes mc-edge-flow{to{stroke-dashoffset:-24}}
-.mc-cluster{position:absolute;border:1px dashed color-mix(in srgb,var(--cc-accent) 26%,var(--cc-hair));border-radius:4px;background:color-mix(in srgb,var(--cc-accent) 3%,transparent);pointer-events:none}
-.mc-clusterLabel{position:absolute;transform:translateY(-100%);padding:0 6px;font-family:var(--mc-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-base);border:1px solid var(--cc-hair);border-left:2px solid var(--cc-accent);line-height:15px;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
 .mc-node{position:absolute;cursor:grab;display:flex;flex-direction:column;gap:5px;padding:8px 9px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 94%,transparent);cursor:pointer;box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent);transition:border-color .12s linear}
 .mc-node:hover{border-color:color-mix(in srgb,var(--cc-accent) 45%,var(--cc-hair))}
 .mc-node[data-selected=true]{border-color:var(--cc-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--cc-accent) 40%,transparent),0 0 24px -14px var(--cc-accent)}
@@ -1204,8 +1202,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
     const NODE_H = 92;
     const NODE_GAP_X = 74;
     const NODE_GAP_Y = 18;
-    const CLUSTER_PAD = 16;
-    const CLUSTER_GAP = 46;
+    const ROOT_GAP = 46;
     const MIN_ZOOM = 0.35;
     const MAX_ZOOM = 1.6;
 
@@ -1290,7 +1287,11 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
      * Tidy layered layout. One column/row per depth, leaves stacked in source
      * order, parents centered on the first/last child, single-child chains
      * straight. `direction` is 'lr' (columns) or 'tb' (rows); `overrides` holds
-     * the user's manual node offsets so edges and clusters follow a dragged node.
+     * the user's manual node offsets so edges follow a dragged node.
+     *
+     * Roots get breathing room (`ROOT_GAP`) but no group frame: the tree edges and
+     * the 主/子 badge already say which subtree a node belongs to, and a frame with
+     * a copy of the root title only added a second "workspace"-looking label.
      */
     function layoutForest(roots, model, direction, overrides) {
       const horizontal = direction !== 'tb';
@@ -1300,7 +1301,6 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       const depthGap = horizontal ? NODE_GAP_X : 70;
       const nodes = [];
       const byId = new Map();
-      const rootNodes = [];
       let cursor = 0;
       const place = (view, depth) => {
         const kids = orderedChildren(view).map((child) => model.viewOf(child));
@@ -1330,11 +1330,11 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       };
 
       for (const root of roots) {
-        rootNodes.push(place(root, 0));
-        cursor += horizontal ? CLUSTER_GAP : CLUSTER_GAP;
+        place(root, 0);
+        cursor += ROOT_GAP;
       }
 
-      // Manual offsets first, so every derived box (cluster, edge, size) follows.
+      // Manual offsets first, so every derived value (edge, size) follows.
       if (overrides) {
         for (const node of nodes) {
           const offset = overrides[node.id];
@@ -1342,24 +1342,6 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           node.x += offset.dx;
           node.y += offset.dy;
         }
-      }
-
-      const clusters = [];
-      for (const rootNode of rootNodes) {
-        const subtree = [];
-        const walk = (node) => {
-          subtree.push(node);
-          for (const childId of node.childIds) {
-            const child = byId.get(childId);
-            if (child) walk(child);
-          }
-        };
-        walk(rootNode);
-        const minX = Math.min(...subtree.map((node) => node.x)) - CLUSTER_PAD;
-        const maxX = Math.max(...subtree.map((node) => node.x + node.w)) + CLUSTER_PAD;
-        const minY = Math.min(...subtree.map((node) => node.y)) - CLUSTER_PAD;
-        const maxY = Math.max(...subtree.map((node) => node.y + node.h)) + CLUSTER_PAD;
-        clusters.push({ id: rootNode.id, title: rootNode.view.title, x: minX, y: minY, w: maxX - minX, h: maxY - minY });
       }
 
       const pad = 40;
@@ -1370,10 +1352,6 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       for (const node of nodes) {
         node.x += shiftX;
         node.y += shiftY;
-      }
-      for (const cluster of clusters) {
-        cluster.x += shiftX;
-        cluster.y += shiftY;
       }
 
       const edges = [];
@@ -1405,7 +1383,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
 
       const width = Math.max(NODE_W, ...nodes.map((node) => node.x + node.w)) + pad;
       const height = Math.max(NODE_H, ...nodes.map((node) => node.y + node.h)) + pad;
-      return { nodes, byId, edges, clusters, width, height };
+      return { nodes, byId, edges, width, height };
     }
 
     function CanvasNode(props) {
@@ -1717,14 +1695,6 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                     'data-active': edge.from === selectedId || edge.to === selectedId ? 'true' : 'false',
                     d: edgeStyle === 'ortho' ? edge.ortho : edge.d,
                   }),
-                ),
-              ),
-              layout.clusters.map((cluster) =>
-                h(
-                  React.Fragment,
-                  { key: `cluster:${cluster.id}` },
-                  h('div', { className: 'mc-cluster', style: { left: cluster.x, top: cluster.y, width: cluster.w, height: cluster.h } }),
-                  h('div', { className: 'mc-clusterLabel', style: { left: cluster.x, top: cluster.y } }, cluster.title),
                 ),
               ),
               layout.nodes.map((node) =>
