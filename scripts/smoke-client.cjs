@@ -506,6 +506,46 @@ clickLabel('直角');
 const orthoPath = findFirst(tree, (node) => node.type === 'path' && node.props && node.props.className === 'mc-edge');
 assert(orthoPath && /H .* V /.test(orthoPath.props.d), 'orthogonal edge path uses H/V segments');
 
+// ---- canvas node dragging ----
+function canvasElement(node) {
+  return findFirst(node, (candidate) => candidate.type === 'div' && candidate.props && candidate.props.className === 'mc-canvas');
+}
+function nodeLeft(tree_, id) {
+  let left;
+  const walk = (node) => {
+    if (!node || typeof node !== 'object' || left !== undefined) return;
+    if (Array.isArray(node)) { for (const child of node) walk(child); return; }
+    if (node.props && node.props.className === 'mc-node' && node.props['data-node-id'] === id) left = node.props.style.left;
+    for (const child of node.children || []) walk(child);
+  };
+  walk(tree_);
+  return left;
+}
+const pointerEvent = (overrides) => Object.assign({
+  button: 0,
+  pointerId: 7,
+  clientX: 100,
+  clientY: 100,
+  currentTarget: { setPointerCapture() {}, releasePointerCapture() {} },
+  target: { closest: (selector) => (selector === '.mc-node' ? { getAttribute: () => 'a' } : null) },
+}, overrides || {});
+
+const before = nodeLeft(tree, 'a');
+const canvas = canvasElement(tree);
+assert(canvas, 'canvas element exposes pointer handlers');
+canvas.props.onPointerDown(pointerEvent());
+canvas.props.onPointerMove(pointerEvent({ clientX: 140 }));
+canvas.props.onPointerUp(pointerEvent({ clientX: 140 }));
+tree = expandPanel();
+const after = nodeLeft(tree, 'a');
+assert(Number.isFinite(before) && Number.isFinite(after) && after > before, `dragging a node moves it (${before} -> ${after})`);
+
+const dragCanvas = canvasElement(tree);
+dragCanvas.props.onPointerDown(pointerEvent({ clientX: 200, clientY: 200 }));
+dragCanvas.props.onPointerUp(pointerEvent({ clientX: 200, clientY: 200 }));
+tree = expandPanel();
+assert(countClass(tree, 'mc-drawer') === 1, 'a click without movement still selects the node');
+
 console.log('SMOKE OK');
 console.log(`registered slots: ${registered.map((r) => `${r.options.name}:${r.options.key || r.options.id}`).join(', ')}`);
 console.log(`render length: ${html.length} chars; drawer length: ${drawerText.length} chars`);

@@ -112,6 +112,9 @@ window.__ModuleLoader__.load({
         focusScope: '子树',
         allScopeTitle: '画所有任务',
         focusScopeTitle: '只画当前任务的子树',
+        reset: '重置布局',
+        resetTitle: '清除手动拖动的位置',
+        scopeNeedSelect: '先选中一个节点，子树范围才生效',
         curve: '曲线',
         ortho: '直角',
         curveTitle: '贝塞尔连线',
@@ -206,6 +209,9 @@ window.__ModuleLoader__.load({
         focusScope: 'Subtree',
         allScopeTitle: 'Draw every task',
         focusScopeTitle: 'Draw the selected task subtree only',
+        reset: 'Reset layout',
+        resetTitle: 'Clear manual node positions',
+        scopeNeedSelect: 'Select a node first, then the subtree scope applies',
         curve: 'Curve',
         ortho: 'Ortho',
         curveTitle: 'Bezier edges',
@@ -694,8 +700,9 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-empty{color:var(--dsw-alias-label-tertiary);font-size:11px;padding:18px 10px;font-family:var(--mc-mono);letter-spacing:.08em;text-transform:uppercase}
 
 /* ---------- node canvas ---------- */
-.mc-canvas{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;touch-action:none;cursor:grab;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 30%,transparent)}
+.mc-canvas{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;touch-action:none;user-select:none;cursor:grab;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 30%,transparent)}
 .mc-canvas[data-panning=true]{cursor:grabbing}
+.mc-canvas[data-dragging=true] .mc-node{cursor:grabbing}
 .mc-canvasWorld{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
 .mc-canvasEdges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 .mc-edge{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-border-l4) 65%,transparent);stroke-width:1}
@@ -703,7 +710,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 @keyframes mc-edge-flow{to{stroke-dashoffset:-24}}
 .mc-cluster{position:absolute;border:1px dashed color-mix(in srgb,var(--cc-accent) 26%,var(--cc-hair));border-radius:4px;background:color-mix(in srgb,var(--cc-accent) 3%,transparent);pointer-events:none}
 .mc-clusterLabel{position:absolute;transform:translateY(-100%);padding:0 6px;font-family:var(--mc-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-base);border:1px solid var(--cc-hair);border-left:2px solid var(--cc-accent);line-height:15px;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
-.mc-node{position:absolute;display:flex;flex-direction:column;gap:5px;padding:8px 9px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 94%,transparent);cursor:pointer;box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent);transition:border-color .12s linear}
+.mc-node{position:absolute;cursor:grab;display:flex;flex-direction:column;gap:5px;padding:8px 9px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 94%,transparent);cursor:pointer;box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent);transition:border-color .12s linear}
 .mc-node:hover{border-color:color-mix(in srgb,var(--cc-accent) 45%,var(--cc-hair))}
 .mc-node[data-selected=true]{border-color:var(--cc-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--cc-accent) 40%,transparent),0 0 24px -14px var(--cc-accent)}
 .mc-node[data-state=needs]{border-color:color-mix(in srgb,var(--mc-warn) 52%,var(--cc-hair))}
@@ -998,9 +1005,10 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
     /**
      * Tidy layered layout. One column/row per depth, leaves stacked in source
      * order, parents centered on the first/last child, single-child chains
-     * straight. `direction` is 'lr' (columns) or 'tb' (rows).
+     * straight. `direction` is 'lr' (columns) or 'tb' (rows); `overrides` holds
+     * the user's manual node offsets so edges and clusters follow a dragged node.
      */
-    function layoutForest(roots, model, direction) {
+    function layoutForest(roots, model, direction, overrides) {
       const horizontal = direction !== 'tb';
       const breadthSize = horizontal ? NODE_H : NODE_W;
       const breadthGap = horizontal ? NODE_GAP_Y : 26;
@@ -1008,6 +1016,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       const depthGap = horizontal ? NODE_GAP_X : 70;
       const nodes = [];
       const byId = new Map();
+      const rootNodes = [];
       let cursor = 0;
       const place = (view, depth) => {
         const kids = orderedChildren(view).map((child) => model.viewOf(child));
@@ -1036,9 +1045,23 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         return node;
       };
 
-      const clusters = [];
       for (const root of roots) {
-        const rootNode = place(root, 0);
+        rootNodes.push(place(root, 0));
+        cursor += horizontal ? CLUSTER_GAP : CLUSTER_GAP;
+      }
+
+      // Manual offsets first, so every derived box (cluster, edge, size) follows.
+      if (overrides) {
+        for (const node of nodes) {
+          const offset = overrides[node.id];
+          if (!offset) continue;
+          node.x += offset.dx;
+          node.y += offset.dy;
+        }
+      }
+
+      const clusters = [];
+      for (const rootNode of rootNodes) {
         const subtree = [];
         const walk = (node) => {
           subtree.push(node);
@@ -1052,8 +1075,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         const maxX = Math.max(...subtree.map((node) => node.x + node.w)) + CLUSTER_PAD;
         const minY = Math.min(...subtree.map((node) => node.y)) - CLUSTER_PAD;
         const maxY = Math.max(...subtree.map((node) => node.y + node.h)) + CLUSTER_PAD;
-        clusters.push({ id: root.id, title: root.title, x: minX, y: minY, w: maxX - minX, h: maxY - minY });
-        cursor += horizontal ? CLUSTER_GAP : CLUSTER_GAP;
+        clusters.push({ id: rootNode.id, title: rootNode.view.title, x: minX, y: minY, w: maxX - minX, h: maxY - minY });
       }
 
       const pad = 40;
@@ -1076,6 +1098,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         const from = parentId ? byId.get(parentId) : undefined;
         if (!from) continue;
         let d;
+        let ortho;
         if (horizontal) {
           const sx = from.x + from.w;
           const sy = from.y + from.h / 2;
@@ -1083,6 +1106,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           const ey = node.y + node.h / 2;
           const reach = Math.max(28, (ex - sx) * 0.45);
           d = `M ${sx} ${sy} C ${sx + reach} ${sy}, ${ex - reach} ${ey}, ${ex} ${ey}`;
+          ortho = `M ${sx} ${sy} H ${(sx + ex) / 2} V ${ey} H ${ex}`;
         } else {
           const sx = from.x + from.w / 2;
           const sy = from.y + from.h;
@@ -1090,12 +1114,8 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           const ey = node.y;
           const reach = Math.max(24, (ey - sy) * 0.45);
           d = `M ${sx} ${sy} C ${sx} ${sy + reach}, ${ex} ${ey - reach}, ${ex} ${ey}`;
+          ortho = `M ${sx} ${sy} V ${(sy + ey) / 2} H ${ex} V ${ey}`;
         }
-        const mx = horizontal ? (from.x + from.w + node.x) / 2 : from.x + from.w / 2;
-        const my = horizontal ? from.y + from.h / 2 : (from.y + from.h + node.y) / 2;
-        const ortho = horizontal
-          ? `M ${from.x + from.w} ${from.y + from.h / 2} H ${mx} V ${node.y + node.h / 2} H ${node.x}`
-          : `M ${from.x + from.w / 2} ${from.y + from.h} V ${my} H ${node.x + node.w / 2} V ${node.y}`;
         edges.push({ id: `${from.id}->${node.id}`, d, ortho, live: node.view.running });
       }
 
@@ -1117,12 +1137,12 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           className: 'mc-node',
           'data-state': state,
           'data-selected': selected,
+          'data-node-id': node.id,
           role: 'button',
           tabIndex: -1,
           'aria-current': selected ? 'true' : undefined,
           title: view.title,
           style: { left: node.x, top: node.y, width: node.w, height: node.h },
-          onClick: () => onSelect(view.id),
           onDoubleClick: () => onOpen(view.id),
         },
         h(
@@ -1171,25 +1191,21 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       const [direction, setDirection] = React.useState('lr');
       const [scope, setScope] = React.useState('all');
       const [edgeStyle, setEdgeStyle] = React.useState('curve');
+      const [overrides, setOverrides] = React.useState({});
+      const overridesRef = React.useRef(overrides);
+      overridesRef.current = overrides;
       const focusId = focus && focus.id ? focus.id : undefined;
-      const scopeRootId = React.useMemo(() => {
-        let id = focusId || selectedId;
-        for (let guard = 0; id && guard < 64; guard += 1) {
-          const view = model.views.get(id);
-          if (!view) return id;
-          const parentId = view.row && typeof view.row.parentId === 'string' ? view.row.parentId : undefined;
-          if (!parentId) return id;
-          id = parentId;
-        }
-        return id;
-      }, [focusId, selectedId, model]);
+      const scopeId = focusId || selectedId;
+      const scopeView = scopeId ? model.views.get(scopeId) : undefined;
       const allRoots = React.useMemo(() => ['needs', 'running', 'idle'].flatMap((state) => groups[state]), [groups]);
       const roots = React.useMemo(() => {
-        if (scope !== 'focus') return allRoots;
-        const scoped = scopeRootId ? allRoots.find((root) => root.id === scopeRootId) : undefined;
-        return scoped ? [scoped] : allRoots;
-      }, [allRoots, scope, scopeRootId]);
-      const layout = React.useMemo(() => layoutForest(roots, model, direction), [roots, model, direction]);
+        if (scope !== 'focus' || !scopeView) return allRoots;
+        return [scopeView];
+      }, [allRoots, scope, scopeView]);
+      const layout = React.useMemo(
+        () => layoutForest(roots, model, direction, overrides),
+        [roots, model, direction, overrides],
+      );
       const [camera, setCamera] = React.useState({ x: 24, y: 24, k: 1 });
       const cameraRef = React.useRef(camera);
       cameraRef.current = camera;
@@ -1266,11 +1282,28 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         return () => wrap.removeEventListener('wheel', onWheel);
       }, []);
 
+      const [draggingNode, setDraggingNode] = React.useState(false);
+      const dragRef = React.useRef(null);
+
       const onPointerDown = (event) => {
         if (event.button !== 0) return;
         const target = event.target;
-        if (target && typeof target.closest === 'function' && (target.closest('.mc-node') || target.closest('button'))) return;
-        panRef.current = { x: event.clientX, y: event.clientY, camera: cameraRef.current };
+        const nodeEl = target && typeof target.closest === 'function' ? target.closest('.mc-node') : null;
+        if (nodeEl) {
+          const id = nodeEl.getAttribute('data-node-id');
+          if (!id) return;
+          const base = overridesRef.current[id] || { dx: 0, dy: 0 };
+          dragRef.current = { mode: 'node', id, x: event.clientX, y: event.clientY, base, moved: false };
+          setDraggingNode(true);
+          try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+          } catch {
+            /* pointer capture is optional */
+          }
+          return;
+        }
+        if (target && typeof target.closest === 'function' && target.closest('button')) return;
+        dragRef.current = { mode: 'pan', x: event.clientX, y: event.clientY, camera: cameraRef.current };
         setPanning(true);
         try {
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -1279,14 +1312,27 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         }
       };
       const onPointerMove = (event) => {
-        const pan = panRef.current;
-        if (!pan) return;
-        setCamera({ x: pan.camera.x + (event.clientX - pan.x), y: pan.camera.y + (event.clientY - pan.y), k: pan.camera.k });
+        const drag = dragRef.current;
+        if (!drag) return;
+        if (drag.mode === 'pan') {
+          setCamera({ x: drag.camera.x + (event.clientX - drag.x), y: drag.camera.y + (event.clientY - drag.y), k: drag.camera.k });
+          return;
+        }
+        const scale = cameraRef.current.k || 1;
+        const dx = drag.base.dx + (event.clientX - drag.x) / scale;
+        const dy = drag.base.dy + (event.clientY - drag.y) / scale;
+        if (!drag.moved && Math.abs(dx - drag.base.dx) + Math.abs(dy - drag.base.dy) > 2) drag.moved = true;
+        setOverrides((previous) => ({ ...previous, [drag.id]: { dx, dy } }));
       };
-      const endPan = (event) => {
-        if (!panRef.current) return;
-        panRef.current = null;
-        setPanning(false);
+      const endDrag = (event) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        dragRef.current = null;
+        if (drag.mode === 'pan') setPanning(false);
+        else {
+          setDraggingNode(false);
+          if (!drag.moved) onSelect(drag.id);
+        }
         try {
           event.currentTarget.releasePointerCapture(event.pointerId);
         } catch {
@@ -1310,10 +1356,11 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           className: 'mc-canvas',
           ref: wrapRef,
           'data-panning': panning,
+          'data-dragging': draggingNode,
           onPointerDown,
           onPointerMove,
-          onPointerUp: endPan,
-          onPointerCancel: endPan,
+          onPointerUp: endDrag,
+          onPointerCancel: endDrag,
         },
         layout.nodes.length === 0
           ? h('div', { className: 'mc-canvasEmpty' }, t('canvas.empty'))
@@ -1361,7 +1408,18 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             'div',
             { className: 'mc-seg', role: 'group' },
             h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.allScopeTitle'), 'aria-pressed': scope === 'all' ? 'true' : 'false', onClick: () => setScope('all') }, t('canvas.allScope')),
-            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.focusScopeTitle'), 'aria-pressed': scope === 'focus' ? 'true' : 'false', onClick: () => setScope('focus') }, t('canvas.focusScope')),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'mc-segBtn',
+                title: scopeView ? t('canvas.focusScopeTitle') : t('canvas.scopeNeedSelect'),
+                disabled: !scopeView,
+                'aria-pressed': scope === 'focus' ? 'true' : 'false',
+                onClick: () => setScope('focus'),
+              },
+              t('canvas.focusScope'),
+            ),
           ),
           h(
             'div',
@@ -1377,6 +1435,18 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           h('button', { type: 'button', className: 'mc-btn', title: t('canvas.zoomOut'), 'aria-label': t('canvas.zoomOut'), onClick: () => zoomBy(1 / 1.25) }, '−'),
           h('span', { className: 'mc-canvasZoom' }, `${Math.round(camera.k * 100)}%`),
           h('button', { type: 'button', className: 'mc-btn', title: t('canvas.zoomIn'), 'aria-label': t('canvas.zoomIn'), onClick: () => zoomBy(1.25) }, '+'),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'mc-btn',
+              title: t('canvas.resetTitle'),
+              'aria-label': t('canvas.reset'),
+              disabled: Object.keys(overrides).length === 0,
+              onClick: () => setOverrides({}),
+            },
+            '↺',
+          ),
         ),
         h('div', { className: 'mc-canvasHint' }, t('canvas.hint')),
       );
