@@ -482,9 +482,27 @@ function nodeBoxes() {
   walk(tree);
   return out;
 }
+function edgePath() {
+  return findFirst(tree, (node) => node.type === 'path' && node.props && node.props.className === 'mc-edge');
+}
 
 assert(countClass(tree, 'mc-node') === 4, 'all-scope canvas draws every task');
-const boxesLr = JSON.stringify(nodeBoxes());
+const boxesTb = JSON.stringify(nodeBoxes());
+assert(/H .* V /.test(edgePath().props.d), 'default edges are orthogonal');
+
+clickLabel('横');
+const boxesLr = nodeBoxes();
+assert(JSON.stringify(boxesLr) !== boxesTb, 'left-to-right layout moves the nodes');
+assert(boxesLr.every((box) => Number.isFinite(box.left) && Number.isFinite(box.top)), 'left-to-right boxes are numbers');
+
+clickLabel('纵');
+assert(JSON.stringify(nodeBoxes()) === boxesTb, 'switching back restores the top-to-bottom boxes');
+
+clickLabel('曲线');
+assert(/ C /.test(edgePath().props.d), 'curve edges use a cubic bezier');
+clickLabel('直角');
+assert(/H .* V /.test(edgePath().props.d), 'orthogonal edges use H/V segments');
+
 clickLabel('子树');
 assert(countClass(tree, 'mc-node') === 3, 'subtree scope draws only the focused case');
 const scopedNodes = [];
@@ -496,15 +514,6 @@ const scopedNodes = [];
 })(tree);
 assert(scopedNodes.some((text) => text.includes('修复登录超时')), 'subtree scope keeps the focused root');
 assert(!scopedNodes.some((text) => text.includes('重构支付模块')), 'subtree scope drops other roots');
-clickLabel('纵');
-const boxesTb = nodeBoxes();
-assert(JSON.stringify(boxesTb) !== boxesLr, 'top-to-bottom layout moves the nodes');
-assert(boxesTb.every((box) => Number.isFinite(box.left) && Number.isFinite(box.top)), 'top-to-bottom boxes are numbers');
-const tbTree = render(tree);
-assert(!/undefined|NaN|null/.test(tbTree.replace(/null/g, '')), 'top-to-bottom render has no NaN');
-clickLabel('直角');
-const orthoPath = findFirst(tree, (node) => node.type === 'path' && node.props && node.props.className === 'mc-edge');
-assert(orthoPath && /H .* V /.test(orthoPath.props.d), 'orthogonal edge path uses H/V segments');
 
 // ---- canvas node dragging ----
 function canvasElement(node) {

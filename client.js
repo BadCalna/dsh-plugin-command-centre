@@ -1002,6 +1002,29 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       return Math.min(max, Math.max(min, value));
     }
 
+    const CANVAS_STORE_KEY = 'dsh.command-centre.canvas.v1';
+
+    function readCanvasPrefs() {
+      try {
+        if (typeof window === 'undefined' || !window.localStorage) return null;
+        const raw = window.localStorage.getItem(CANVAS_STORE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function writeCanvasPrefs(value) {
+      try {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        window.localStorage.setItem(CANVAS_STORE_KEY, JSON.stringify(value));
+      } catch {
+        /* private mode / quota: layout memory is best-effort */
+      }
+    }
+
     /**
      * Tidy layered layout. One column/row per depth, leaves stacked in source
      * order, parents centered on the first/last child, single-child chains
@@ -1188,10 +1211,14 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 
     function Canvas(props) {
       const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef } = props;
-      const [direction, setDirection] = React.useState('lr');
-      const [scope, setScope] = React.useState('all');
-      const [edgeStyle, setEdgeStyle] = React.useState('curve');
-      const [overrides, setOverrides] = React.useState({});
+      const stored = React.useMemo(() => readCanvasPrefs(), []);
+      const [direction, setDirection] = React.useState(stored && stored.direction === 'lr' ? 'lr' : 'tb');
+      const [scope, setScope] = React.useState(stored && stored.scope === 'focus' ? 'focus' : 'all');
+      const [edgeStyle, setEdgeStyle] = React.useState(stored && stored.edgeStyle === 'curve' ? 'curve' : 'ortho');
+      const [overrides, setOverrides] = React.useState(() => {
+        const saved = stored && stored.overrides;
+        return saved && typeof saved === 'object' ? saved : {};
+      });
       const overridesRef = React.useRef(overrides);
       overridesRef.current = overrides;
       const focusId = focus && focus.id ? focus.id : undefined;
@@ -1248,6 +1275,11 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         },
         [layout],
       );
+
+      React.useEffect(() => {
+        const timer = setTimeout(() => writeCanvasPrefs({ direction, edgeStyle, scope, overrides }), 250);
+        return () => clearTimeout(timer);
+      }, [direction, edgeStyle, scope, overrides]);
 
       React.useEffect(() => {
         const key = `${focusId || 'all'}:${focus && focus.nonce ? focus.nonce : 0}:${layout.nodes.length}:${direction}:${scope}`;
