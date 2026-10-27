@@ -82,6 +82,14 @@ window.__ModuleLoader__.load({
         unread: '有新结果',
         files: '文件区',
         dialogue: '对话区',
+        paths: '个路径',
+        writes: '次写入',
+        preview: '文件预览',
+        openExternal: '在桌面打开',
+        loading: '读取中…',
+        previewUnsupported: '这个类型不能内嵌预览，用「在桌面打开」',
+        previewError: '读取失败',
+        truncated: '仅显示前 {n} 行',
         noFiles: '还没有写入文件',
         noText: '还没有回复',
         lastTool: '最近工具',
@@ -101,11 +109,21 @@ window.__ModuleLoader__.load({
       crashed: '这个面板渲染出错，已降级为空视图。',
       errors: { noStore: '会话列表不可用' },
       shortcut: { open: '打开 / 返回 Command Centre' },
+      settings: {
+        title: '设置',
+        open: '设置',
+        defaultView: '默认界面',
+        quiet: '安静模式默认开启',
+        restoreView: '记住上次界面',
+        hint: '画布的默认方向 / 连线 / 位置在画布左上角与拖动时自动保存',
+        on: '开',
+        off: '关',
+      },
       canvas: {
         fit: '适配',
         zoomIn: '放大',
         zoomOut: '缩小',
-        hint: '拖拽平移 · ⌘滚轮缩放 · 0 适配 · 双击打开',
+        hint: '滚轮缩放 · 拖拽平移 · 0 适配 · 双击打开',
         root: '主',
         sub: '子',
         empty: '没有可画的节点',
@@ -113,13 +131,8 @@ window.__ModuleLoader__.load({
         tb: '纵',
         lrTitle: '左→右布局',
         tbTitle: '上→下布局',
-        allScope: '全部',
-        focusScope: '子树',
-        allScopeTitle: '画所有任务',
-        focusScopeTitle: '只画当前任务的子树',
         reset: '重置布局',
         resetTitle: '清除手动拖动的位置',
-        scopeNeedSelect: '先选中一个节点，子树范围才生效',
         curve: '曲线',
         ortho: '直角',
         curveTitle: '贝塞尔连线',
@@ -184,6 +197,14 @@ window.__ModuleLoader__.load({
         unread: 'new result',
         files: 'Files',
         dialogue: 'Dialogue',
+        paths: 'paths',
+        writes: 'writes',
+        preview: 'File preview',
+        openExternal: 'Open on desktop',
+        loading: 'Loading…',
+        previewUnsupported: 'No inline preview for this type — use "Open on desktop"',
+        previewError: 'Read failed',
+        truncated: 'First {n} lines only',
         noFiles: 'No files written yet',
         noText: 'No answer yet',
         lastTool: 'Last tool',
@@ -203,11 +224,21 @@ window.__ModuleLoader__.load({
       crashed: 'This panel crashed and fell back to an empty view.',
       errors: { noStore: 'Session list unavailable' },
       shortcut: { open: 'Open / return to Command Centre' },
+      settings: {
+        title: 'Settings',
+        open: 'Settings',
+        defaultView: 'Default view',
+        quiet: 'Quiet mode by default',
+        restoreView: 'Remember the last view',
+        hint: 'Canvas direction, edge style and node positions save from the canvas itself',
+        on: 'on',
+        off: 'off',
+      },
       canvas: {
         fit: 'Fit',
         zoomIn: 'Zoom in',
         zoomOut: 'Zoom out',
-        hint: 'Drag to pan · ⌘wheel to zoom · 0 to fit · double-click to open',
+        hint: 'Wheel to zoom · drag to pan · 0 to fit · double-click to open',
         root: 'main',
         sub: 'sub',
         empty: 'No nodes to draw',
@@ -215,13 +246,8 @@ window.__ModuleLoader__.load({
         tb: 'TB',
         lrTitle: 'Left to right',
         tbTitle: 'Top to bottom',
-        allScope: 'All',
-        focusScope: 'Subtree',
-        allScopeTitle: 'Draw every task',
-        focusScopeTitle: 'Draw the selected task subtree only',
         reset: 'Reset layout',
         resetTitle: 'Clear manual node positions',
-        scopeNeedSelect: 'Select a node first, then the subtree scope applies',
         curve: 'Curve',
         ortho: 'Ortho',
         curveTitle: 'Bezier edges',
@@ -269,6 +295,30 @@ window.__ModuleLoader__.load({
       if (!unit) return t('lessThanMinute');
       const ago = t('ago');
       return ago === 'ago' ? `${unit} ${ago}` : `${unit}${ago}`;
+    }
+
+    function baseName(path) {
+      const parts = String(path).split('/');
+      return parts[parts.length - 1] || path;
+    }
+
+    function shortPath(path, keep) {
+      const parts = String(path).split('/').filter((part) => part !== '');
+      const tail = keep && keep > 0 ? keep : 2;
+      if (parts.length <= tail) return String(path);
+      return `…/${parts.slice(-tail).join('/')}`;
+    }
+
+    function fileKind(path) {
+      const name = baseName(path).toLowerCase();
+      const dot = name.lastIndexOf('.');
+      const extension = dot >= 0 ? name.slice(dot + 1) : '';
+      if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'].includes(extension)) return 'image';
+      if (['mp4', 'webm', 'mov', 'mp3', 'wav', 'ogg', 'm4a'].includes(extension)) return 'media';
+      if (
+        ['md', 'markdown', 'txt', 'log', 'json', 'jsonc', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'scss', 'html', 'htm', 'xml', 'yml', 'yaml', 'toml', 'ini', 'csv', 'tsv', 'sh', 'zsh', 'bash', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cc', 'cpp', 'hpp', 'cs', 'php', 'sql', 'diff', 'patch', 'mjs', 'tex'].includes(extension)
+      ) return 'text';
+      return 'other';
     }
 
     function percent(part, whole) {
@@ -760,8 +810,10 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-canvas[data-dragging=true] .mc-node{cursor:grabbing}
 .mc-canvasWorld{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
 .mc-canvasEdges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
-.mc-edge{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-border-l4) 65%,transparent);stroke-width:1}
-.mc-edge[data-live=true]{stroke:color-mix(in srgb,var(--mc-run) 62%,transparent);stroke-dasharray:6 6;animation:mc-edge-flow 1.4s linear infinite}
+.mc-edge{fill:none;stroke:color-mix(in srgb,var(--cc-accent) 45%,var(--dsw-alias-border-l4));stroke-width:1.6;stroke-linecap:round}
+.mc-edge[data-live=true]{stroke:color-mix(in srgb,var(--mc-run) 72%,transparent);stroke-width:1.9;stroke-dasharray:6 6;animation:mc-edge-flow 1.4s linear infinite}
+.mc-edge[data-active=true]{stroke:var(--cc-accent);stroke-width:2.3;filter:drop-shadow(0 0 3px var(--cc-glow))}
+.mc-edge[data-active=true][data-live=true]{stroke:var(--mc-run)}
 @keyframes mc-edge-flow{to{stroke-dashoffset:-24}}
 .mc-cluster{position:absolute;border:1px dashed color-mix(in srgb,var(--cc-accent) 26%,var(--cc-hair));border-radius:4px;background:color-mix(in srgb,var(--cc-accent) 3%,transparent);pointer-events:none}
 .mc-clusterLabel{position:absolute;transform:translateY(-100%);padding:0 6px;font-family:var(--mc-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-base);border:1px solid var(--cc-hair);border-left:2px solid var(--cc-accent);line-height:15px;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
@@ -776,6 +828,20 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-canvasOptions{position:absolute;left:10px;top:10px;z-index:3;display:flex;gap:6px;flex-wrap:wrap}
 .mc-canvasCtl{position:absolute;right:10px;bottom:10px;z-index:3;display:flex;align-items:center;gap:3px;padding:4px 5px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 94%,transparent)}
 .mc-canvasZoom{font-family:var(--mc-mono);font-size:10px;color:var(--dsw-alias-label-tertiary);min-width:40px;text-align:center;font-variant-numeric:tabular-nums}
+.mc-itemLink{cursor:pointer;border-radius:2px}
+.mc-itemLink:hover .mc-itemText{color:var(--cc-accent-ink);text-decoration:underline;text-underline-offset:2px}
+.mc-preview{position:absolute;inset:0;z-index:7;display:flex;flex-direction:column;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 98%,transparent);border:1px solid color-mix(in srgb,var(--cc-accent) 30%,var(--cc-hair))}
+.mc-previewHead{flex:none;display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--cc-hair);min-width:0}
+html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-frame-top-clearance,0px))}
+.mc-previewName{flex:1 1 auto;min-width:0;font-family:var(--mc-mono);font-size:11px;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mc-previewPath{flex:none;max-width:46%;color:var(--dsw-alias-label-tertiary);font-family:var(--mc-mono);font-size:9.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.mc-previewBody{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 12px}
+.mc-previewText{margin:0;font-family:var(--mc-mono);font-size:11.5px;line-height:17px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--dsw-alias-label-secondary)}
+.mc-previewImage{display:block;max-width:100%;max-height:100%;margin:0 auto;object-fit:contain;background:repeating-conic-gradient(color-mix(in srgb,var(--dsw-alias-bg-layer-3) 60%,transparent) 0 25%,transparent 0 50%) 0 0/16px 16px}
+.mc-settingsRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid color-mix(in srgb,var(--cc-hair) 70%,transparent)}
+.mc-settingsLabel{color:var(--dsw-alias-label-secondary);font-size:12px}
+.mc-previewNote{color:var(--dsw-alias-label-tertiary);font-size:11px;font-family:var(--mc-mono);letter-spacing:.04em}
+.mc-previewFoot{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--cc-hair)}
 .mc-canvasHint{position:absolute;left:10px;bottom:12px;z-index:3;color:var(--dsw-alias-label-tertiary);font-family:var(--mc-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;pointer-events:none}
 .mc-canvasEmpty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:11px;font-family:var(--mc-mono);letter-spacing:.08em;text-transform:uppercase}
 
@@ -1083,7 +1149,10 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
     }
 
     /** Host route survives an App restart (the Web origin's port changes per launch). */
-    async function loadCanvasPrefs() {
+    let prefsCache = null;
+    let prefsInflight = null;
+
+    async function fetchServerPrefs() {
       try {
         if (typeof fetch === 'function') {
           const response = await fetch(CANVAS_PREFS_ROUTE, { headers: { accept: 'application/json' }, cache: 'no-store' });
@@ -1095,17 +1164,33 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       } catch {
         /* route unavailable (older Host or no cache yet) */
       }
-      return readLocalCanvasPrefs();
+      return null;
     }
 
-    function saveCanvasPrefs(value) {
-      writeLocalCanvasPrefs(value);
+    async function ensurePrefs() {
+      if (prefsCache) return prefsCache;
+      if (!prefsInflight) {
+        prefsInflight = (async () => {
+          const local = readLocalCanvasPrefs() || {};
+          const server = await fetchServerPrefs();
+          prefsCache = { ...local, ...(server || {}) };
+          return prefsCache;
+        })().finally(() => {
+          prefsInflight = null;
+        });
+      }
+      return prefsInflight;
+    }
+
+    function updatePrefs(patch) {
+      prefsCache = { ...(prefsCache || {}), ...patch };
+      writeLocalCanvasPrefs(prefsCache);
       try {
         if (typeof fetch !== 'function') return;
         fetch(CANVAS_PREFS_ROUTE, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(value),
+          body: JSON.stringify(prefsCache),
         }).catch(() => {});
       } catch {
         /* persistence is best-effort */
@@ -1226,7 +1311,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           d = `M ${sx} ${sy} C ${sx} ${sy + reach}, ${ex} ${ey - reach}, ${ex} ${ey}`;
           ortho = `M ${sx} ${sy} V ${(sy + ey) / 2} H ${ex} V ${ey}`;
         }
-        edges.push({ id: `${from.id}->${node.id}`, d, ortho, live: node.view.running });
+        edges.push({ id: `${from.id}->${node.id}`, from: from.id, to: node.id, d, ortho, live: node.view.running });
       }
 
       const width = Math.max(NODE_W, ...nodes.map((node) => node.x + node.w)) + pad;
@@ -1300,7 +1385,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef } = props;
       const stored = React.useMemo(() => readLocalCanvasPrefs(), []);
       const [direction, setDirection] = React.useState(stored && stored.direction === 'lr' ? 'lr' : 'tb');
-      const [scope, setScope] = React.useState(stored && stored.scope === 'focus' ? 'focus' : 'all');
+
       const [edgeStyle, setEdgeStyle] = React.useState(stored && stored.edgeStyle === 'curve' ? 'curve' : 'ortho');
       const [overrides, setOverrides] = React.useState(() => {
         const saved = stored && stored.overrides;
@@ -1312,10 +1397,6 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         touchedRef.current = true;
         setDirection(value);
       };
-      const changeScope = (value) => {
-        touchedRef.current = true;
-        setScope(value);
-      };
       const changeEdgeStyle = (value) => {
         touchedRef.current = true;
         setEdgeStyle(value);
@@ -1323,12 +1404,11 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 
       React.useEffect(() => {
         let alive = true;
-        loadCanvasPrefs().then((prefs) => {
+        ensurePrefs().then((prefs) => {
           if (!alive) return;
           if (prefs && !touchedRef.current) {
             if (prefs.direction === 'lr' || prefs.direction === 'tb') setDirection(prefs.direction);
-            if (prefs.scope === 'focus' || prefs.scope === 'all') setScope(prefs.scope);
-            if (prefs.edgeStyle === 'curve' || prefs.edgeStyle === 'ortho') setEdgeStyle(prefs.edgeStyle);
+              if (prefs.edgeStyle === 'curve' || prefs.edgeStyle === 'ortho') setEdgeStyle(prefs.edgeStyle);
             if (prefs.overrides && typeof prefs.overrides === 'object' && !Array.isArray(prefs.overrides)) setOverrides(prefs.overrides);
           }
           setHydrated(true);
@@ -1340,13 +1420,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       const overridesRef = React.useRef(overrides);
       overridesRef.current = overrides;
       const focusId = focus && focus.id ? focus.id : undefined;
-      const scopeId = focusId || selectedId;
-      const scopeView = scopeId ? model.views.get(scopeId) : undefined;
-      const allRoots = React.useMemo(() => ['needs', 'running', 'failed', 'idle'].flatMap((state) => groups[state]), [groups]);
-      const roots = React.useMemo(() => {
-        if (scope !== 'focus' || !scopeView) return allRoots;
-        return [scopeView];
-      }, [allRoots, scope, scopeView]);
+      const roots = React.useMemo(() => ['needs', 'running', 'failed', 'idle'].flatMap((state) => groups[state]), [groups]);
       const layout = React.useMemo(
         () => layoutForest(roots, model, direction, overrides),
         [roots, model, direction, overrides],
@@ -1397,16 +1471,16 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       React.useEffect(() => {
         // Never write defaults over stored preferences before hydration resolved.
         if (!hydrated) return undefined;
-        const timer = setTimeout(() => saveCanvasPrefs({ direction, edgeStyle, scope, overrides }), 250);
+        const timer = setTimeout(() => updatePrefs({ direction, edgeStyle, overrides }), 250);
         return () => clearTimeout(timer);
-      }, [hydrated, direction, edgeStyle, scope, overrides]);
+      }, [hydrated, direction, edgeStyle, overrides]);
 
       React.useEffect(() => {
-        const key = `${focusId || 'all'}:${focus && focus.nonce ? focus.nonce : 0}:${layout.nodes.length}:${direction}:${scope}`;
+        const key = `${focusId || 'all'}:${focus && focus.nonce ? focus.nonce : 0}:${layout.nodes.length}:${direction}`;
         if (fittedRef.current === key) return;
         fittedRef.current = key;
         fit(focusId);
-      }, [fit, focusId, focus, layout, direction, scope]);
+      }, [fit, focusId, focus, layout, direction]);
 
       React.useEffect(() => {
         if (fitRef) fitRef.current = () => fit(focusId);
@@ -1421,14 +1495,17 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           const px = event.clientX - rect.left;
           const py = event.clientY - rect.top;
           const current = cameraRef.current;
-          if (event.metaKey || event.ctrlKey) {
-            const factor = Math.exp(-event.deltaY * 0.0015);
-            const k = clamp(current.k * factor, MIN_ZOOM, MAX_ZOOM);
-            const ratio = k / current.k;
-            setCamera({ x: px - (px - current.x) * ratio, y: py - (py - current.y) * ratio, k });
-          } else {
+          // A plain wheel zooms around the pointer; Shift+wheel keeps a pan escape hatch
+          // for trackpads that scroll horizontally.
+          if (event.shiftKey) {
             setCamera({ x: current.x - event.deltaX, y: current.y - event.deltaY, k: current.k });
+            return;
           }
+          const delta = event.deltaY || event.deltaX;
+          const factor = Math.exp(-delta * 0.0015);
+          const k = clamp(current.k * factor, MIN_ZOOM, MAX_ZOOM);
+          const ratio = k / current.k;
+          setCamera({ x: px - (px - current.x) * ratio, y: py - (py - current.y) * ratio, k });
         };
         wrap.addEventListener('wheel', onWheel, { passive: false });
         return () => wrap.removeEventListener('wheel', onWheel);
@@ -1510,6 +1587,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           ref: wrapRef,
           'data-panning': panning,
           'data-dragging': draggingNode,
+          onContextMenu: (event) => event.preventDefault(),
           onPointerDown,
           onPointerMove,
           onPointerUp: endDrag,
@@ -1524,7 +1602,13 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
                 'svg',
                 { className: 'mc-canvasEdges', width: layout.width, height: layout.height, viewBox: `0 0 ${layout.width} ${layout.height}`, 'aria-hidden': true },
                 layout.edges.map((edge) =>
-                  h('path', { key: edge.id, className: 'mc-edge', 'data-live': edge.live ? 'true' : 'false', d: edgeStyle === 'ortho' ? edge.ortho : edge.d }),
+                  h('path', {
+                    key: edge.id,
+                    className: 'mc-edge',
+                    'data-live': edge.live ? 'true' : 'false',
+                    'data-active': edge.from === selectedId || edge.to === selectedId ? 'true' : 'false',
+                    d: edgeStyle === 'ortho' ? edge.ortho : edge.d,
+                  }),
                 ),
               ),
               layout.clusters.map((cluster) =>
@@ -1556,23 +1640,6 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             { className: 'mc-seg', role: 'group' },
             h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.lrTitle'), 'aria-pressed': direction === 'lr' ? 'true' : 'false', onClick: () => changeDirection('lr') }, t('canvas.lr')),
             h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.tbTitle'), 'aria-pressed': direction === 'tb' ? 'true' : 'false', onClick: () => changeDirection('tb') }, t('canvas.tb')),
-          ),
-          h(
-            'div',
-            { className: 'mc-seg', role: 'group' },
-            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.allScopeTitle'), 'aria-pressed': scope === 'all' ? 'true' : 'false', onClick: () => changeScope('all') }, t('canvas.allScope')),
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'mc-segBtn',
-                title: scopeView ? t('canvas.focusScopeTitle') : t('canvas.scopeNeedSelect'),
-                disabled: !scopeView,
-                'aria-pressed': scope === 'focus' ? 'true' : 'false',
-                onClick: () => changeScope('focus'),
-              },
-              t('canvas.focusScope'),
-            ),
           ),
           h(
             'div',
@@ -1784,7 +1851,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 
     // #region drawer
     function Drawer(props) {
-      const { view, model, t, now, onClose, onOpen, onOpenParent } = props;
+      const { view, model, t, now, onClose, onOpen, onOpenParent, onPreview } = props;
       const values = view.values || {};
       const goal = values.goal && values.goal.goal ? values.goal : undefined;
       const team = values.agentTeam;
@@ -1965,7 +2032,9 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
                     h(
                       'span',
                       { className: 'mc-zoneTitle' },
-                      output.fileCount > 0 ? `${t('drawer.files')} · ${output.fileCount}` : t('drawer.files'),
+                      output.files.length > 0
+                        ? `${t('drawer.files')} · ${output.files.length} ${t('drawer.paths')}${output.fileCount > output.files.length ? ` · ${output.fileCount} ${t('drawer.writes')}` : ''}`
+                        : t('drawer.files'),
                     ),
                     output.files.length > 0
                       ? h(
@@ -1974,9 +2043,17 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
                           output.files.map((file) =>
                             h(
                               'li',
-                              { className: 'mc-item', key: file },
+                              {
+                                className: 'mc-item mc-itemLink',
+                                key: file,
+                                title: file,
+                                onClick: () => {
+                                  if (onPreview) onPreview(file);
+                                },
+                              },
                               h('span', { className: 'mc-itemDot', 'data-status': 'completed' }),
-                              h('span', { className: 'mc-itemText', title: file }, file),
+                              h('span', { className: 'mc-itemText' }, shortPath(file, 2)),
+                              h('span', { className: 'mc-itemMeta' }, baseName(file)),
                             ),
                           ),
                         )
@@ -2001,6 +2078,124 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             : null,
           h('button', { type: 'button', className: 'mc-btn', onClick: onClose }, t('action.close')),
         ),
+      );
+    }
+
+    function SettingsPanel(props) {
+      const { t, settings, onChange, onClose } = props;
+      const choices = [
+        ['board', t('view.board')],
+        ['list', t('view.list')],
+        ['canvas', t('view.canvas')],
+      ];
+      const row = (label, control) => h('div', { className: 'mc-settingsRow' }, h('span', { className: 'mc-settingsLabel' }, label), control);
+      return h(
+        'div',
+        { className: 'mc-preview mc-settings', role: 'dialog', 'aria-label': t('settings.title') },
+        h(
+          'div',
+          { className: 'mc-previewHead' },
+          h('span', { className: 'mc-previewName' }, t('settings.title')),
+          h('button', { type: 'button', className: 'mc-btn', onClick: onClose, title: t('action.close'), 'aria-label': t('action.close') }, '✕'),
+        ),
+        h(
+          'div',
+          { className: 'mc-previewBody' },
+          row(
+            t('settings.defaultView'),
+            h(
+              'div',
+              { className: 'mc-seg', role: 'group', 'aria-label': t('settings.defaultView') },
+              choices.map(([value, label]) =>
+                h(
+                  'button',
+                  { key: value, type: 'button', className: 'mc-segBtn', 'aria-pressed': settings.defaultView === value ? 'true' : 'false', onClick: () => onChange({ ...settings, defaultView: value }) },
+                  label,
+                ),
+              ),
+            ),
+          ),
+          row(
+            t('settings.quiet'),
+            h('button', { type: 'button', className: 'mc-btn', 'aria-pressed': settings.quiet ? 'true' : 'false', onClick: () => onChange({ ...settings, quiet: !settings.quiet }) }, settings.quiet ? t('settings.on') : t('settings.off')),
+          ),
+          row(
+            t('settings.restoreView'),
+            h('button', { type: 'button', className: 'mc-btn', 'aria-pressed': settings.restoreView ? 'true' : 'false', onClick: () => onChange({ ...settings, restoreView: !settings.restoreView }) }, settings.restoreView ? t('settings.on') : t('settings.off')),
+          ),
+          h('div', { className: 'mc-previewNote', style: { marginTop: 10 } }, t('settings.hint')),
+        ),
+        h('div', { className: 'mc-previewFoot' }, h('span', { className: 'mc-previewNote' }, t('title'))),
+      );
+    }
+
+    function FilePreview(props) {
+      const { file, sessionId, t, onClose, readTextFile, openPath, fileBytesUrl } = props;
+      const kind = fileKind(file);
+      const [state, setState] = React.useState({ status: kind === 'image' ? 'image' : kind === 'text' ? 'loading' : 'other', text: '', lines: 0, eof: true, error: '' });
+
+      React.useEffect(() => {
+        let alive = true;
+        setState((previous) => ({ ...previous, status: kind === 'image' ? 'image' : kind === 'text' ? 'loading' : 'other', error: '' }));
+        if (kind !== 'text' || typeof readTextFile !== 'function') return () => { alive = false; };
+        Promise.resolve()
+          .then(() => readTextFile(sessionId, file))
+          .then((page) => {
+            if (!alive) return;
+            const text = page && typeof page.text === 'string' ? page.text : '';
+            setState({ status: 'text', text, lines: Array.isArray(page && page.lines) ? page.lines.length : text.split('\n').length, eof: page ? page.eof !== false : true, error: '' });
+          })
+          .catch((error) => {
+            if (!alive) return;
+            setState({ status: 'error', text: '', lines: 0, eof: true, error: error && error.message ? error.message : String(error) });
+          });
+        return () => {
+          alive = false;
+        };
+      }, [file, sessionId, kind, readTextFile]);
+
+      const body = (() => {
+        if (state.status === 'image') return h('img', { className: 'mc-previewImage', src: typeof fileBytesUrl === 'function' ? fileBytesUrl(file) : '', alt: baseName(file) });
+        if (state.status === 'text') {
+          return h(
+            React.Fragment,
+            null,
+            h('pre', { className: 'mc-previewText' }, state.text || '—'),
+            state.eof === false ? h('div', { className: 'mc-previewNote' }, t('drawer.truncated').replace('{n}', String(state.lines))) : null,
+          );
+        }
+        if (state.status === 'error') return h('div', { className: 'mc-previewNote' }, `${t('drawer.previewError')}: ${state.error}`);
+        if (state.status === 'loading') return h('div', { className: 'mc-previewNote' }, t('drawer.loading'));
+        return h('div', { className: 'mc-previewNote' }, t('drawer.previewUnsupported'));
+      })();
+
+      return h(
+        'div',
+        { className: 'mc-preview', role: 'dialog', 'aria-label': t('drawer.preview') },
+        h(
+          'div',
+          { className: 'mc-previewHead' },
+          h('span', { className: 'mc-previewName', title: file }, baseName(file)),
+          h('span', { className: 'mc-previewPath', title: file }, file),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'mc-btn',
+              onClick: () => {
+                if (typeof openPath === 'function') {
+                  Promise.resolve()
+                    .then(() => openPath(file))
+                    .catch((error) => setState((previous) => ({ ...previous, status: 'error', error: error && error.message ? error.message : String(error) })));
+                }
+              },
+            },
+            t('drawer.openExternal'),
+          ),
+          h('button', { type: 'button', className: 'mc-btn', onClick: onClose, title: t('action.close'), 'aria-label': t('action.close') }, '✕'),
+        ),
+        h('div', { className: 'mc-previewBody' }, body),
+        h('div', { className: 'mc-previewFoot' }, h('span', { className: 'mc-previewNote' }, shortPath(file, 3))),
       );
     }
 
@@ -2042,6 +2237,10 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       const [workspaceFilter, setWorkspaceFilter] = React.useState('all');
       const [viewMode, setViewMode] = React.useState('board');
       const [canvasFocus, setCanvasFocus] = React.useState({ id: null, nonce: 0 });
+      const [previewFile, setPreviewFile] = React.useState(null);
+      const [settingsOpen, setSettingsOpen] = React.useState(false);
+      const [settings, setSettings] = React.useState({ defaultView: 'board', quiet: false, restoreView: false });
+      const viewTouchedRef = React.useRef(false);
       const canvasFitRef = React.useRef(null);
       const [expanded, setExpanded] = React.useState({});
       const [now, setNow] = React.useState(() => Date.now());
@@ -2053,6 +2252,34 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         const timer = setInterval(() => setNow(Date.now()), 15000);
         return () => clearInterval(timer);
       }, []);
+
+      React.useEffect(() => {
+        let alive = true;
+        ensurePrefs().then((prefs) => {
+          if (!alive || !prefs) return;
+          const stored = prefs.settings && typeof prefs.settings === 'object' ? prefs.settings : {};
+          const validView = (value) => value === 'board' || value === 'list' || value === 'canvas';
+          const next = {
+            defaultView: validView(stored.defaultView) ? stored.defaultView : 'board',
+            quiet: stored.quiet === true,
+            restoreView: stored.restoreView === true,
+          };
+          setSettings(next);
+          setQuiet(next.quiet);
+          if (!viewTouchedRef.current) {
+            const target = next.restoreView && validView(stored.lastView) ? stored.lastView : next.defaultView;
+            setViewMode(target);
+          }
+        });
+        return () => {
+          alive = false;
+        };
+      }, []);
+
+      React.useEffect(() => {
+        const timer = setTimeout(() => updatePrefs({ settings: { ...settings, lastView: viewMode } }), 250);
+        return () => clearTimeout(timer);
+      }, [settings, viewMode]);
 
       const workspaceTitles = React.useMemo(() => {
         const map = new Map();
@@ -2178,6 +2405,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             }
           } else if (key === 'v' || key === 'V') {
             event.preventDefault();
+            viewTouchedRef.current = true;
             setViewMode((previous) => (previous === 'board' ? 'list' : previous === 'list' ? 'canvas' : 'board'));
           } else if (key === 'f' || key === 'F') {
             event.preventDefault();
@@ -2240,9 +2468,9 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             h(
               'div',
               { className: 'mc-seg', role: 'group', 'aria-label': t('view.board') },
-              h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'board' ? 'true' : 'false', onClick: () => setViewMode('board') }, t('view.board')),
-              h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'list' ? 'true' : 'false', onClick: () => setViewMode('list') }, t('view.list')),
-              h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'canvas' ? 'true' : 'false', onClick: () => setViewMode('canvas') }, t('view.canvas')),
+              h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'board' ? 'true' : 'false', onClick: () => { viewTouchedRef.current = true; setViewMode('board'); } }, t('view.board')),
+              h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'list' ? 'true' : 'false', onClick: () => { viewTouchedRef.current = true; setViewMode('list'); } }, t('view.list')),
+              h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'canvas' ? 'true' : 'false', onClick: () => { viewTouchedRef.current = true; setViewMode('canvas'); } }, t('view.canvas')),
             ),
             workspaceNames.length > 1
               ? h(
@@ -2290,6 +2518,11 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
               { type: 'button', className: 'mc-btn', 'aria-pressed': quiet ? 'true' : 'false', onClick: () => setQuiet((previous) => !previous) },
               t('quiet'),
             ),
+            h(
+              'button',
+              { type: 'button', className: 'mc-btn', 'aria-pressed': settingsOpen ? 'true' : 'false', title: t('settings.open'), 'aria-label': t('settings.open'), onClick: () => setSettingsOpen((previous) => !previous) },
+              '⚙',
+            ),
           ),
         ),
         h(Banner, { views: needs, t, now, onSelect: selectRow }),
@@ -2312,6 +2545,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
                     expanded,
                     onToggle: toggleRow,
                     onFocusCanvas: (id) => {
+                      viewTouchedRef.current = true;
                       setCanvasFocus({ id, nonce: Date.now() });
                       setViewMode('canvas');
                     },
@@ -2335,8 +2569,39 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
               React.Fragment,
               null,
               h('div', { className: 'mc-scrim', 'aria-hidden': true, onClick: () => setSelectedId(null) }),
-              h(Drawer, { view: selected, model, t, now, onClose: () => setSelectedId(null), onOpen: openSession, onOpenParent: openSession }),
+              h(Drawer, {
+                view: selected,
+                model,
+                t,
+                now,
+                onClose: () => setSelectedId(null),
+                onOpen: openSession,
+                onOpenParent: openSession,
+                onPreview: (file) => setPreviewFile(file),
+              }),
             )
+          : null,
+        settingsOpen
+          ? h(SettingsPanel, {
+              t,
+              settings,
+              onClose: () => setSettingsOpen(false),
+              onChange: (next) => {
+                setSettings(next);
+                setQuiet(next.quiet);
+              },
+            })
+          : null,
+        previewFile
+          ? h(FilePreview, {
+              file: previewFile,
+              sessionId: selected ? selected.id : undefined,
+              t,
+              onClose: () => setPreviewFile(null),
+              readTextFile: props.readTextFile,
+              openPath: props.openPath,
+              fileBytesUrl: props.fileBytesUrl,
+            })
           : null,
         h(
           'footer',
@@ -2365,6 +2630,16 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       );
       const t = ctx.locale.bind(NS);
 
+      // Optional remotes: file reads and native open. Absent services only cost the
+      // preview's "open on desktop" button, never the panel.
+      let remotes;
+      ctx.inject(['remote'], (scope) => {
+        remotes = scope.remote;
+        return () => {
+          remotes = undefined;
+        };
+      });
+
       const pageProps = {
         openSession: (id) => {
           try {
@@ -2383,6 +2658,18 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           }
         },
         refreshProjections: (id) => ctx.sessions.refreshProjections(id),
+        readTextFile: async (sessionId, path) => {
+          const files = remotes && remotes.workspaceFiles;
+          if (!files || typeof files.read !== 'function') throw new Error('workspace-files remote unavailable');
+          const page = await files.read(sessionId, path, { offset: 1, limit: 400 }, undefined);
+          return page;
+        },
+        openPath: async (path) => {
+          const session = remotes && remotes.session;
+          if (!session || typeof session.openWorkspacePath !== 'function') throw new Error('native open unavailable');
+          await session.openWorkspacePath({ path });
+        },
+        fileBytesUrl: (path) => `api/file?path=${encodeURIComponent(path)}`,
       };
 
       ctx.slots.inject('main', () =>

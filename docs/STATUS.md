@@ -1,6 +1,6 @@
 # STATUS — Command Centre
 
-> 最后更新：2026-10-27 · v0.7.0（V1b：产出投影 + 失败列 + Host 侧持久化）。
+> 最后更新：2026-10-27 · v0.8.0（画布可用性 + 文件预览 + 设置）。
 
 ## 现在是什么状态
 
@@ -21,6 +21,9 @@
   - `v0.7.0` **V1b**：Host 投影 `missionControl`（最后回答 200 字 / 写入文件最近 5 个+次数 / 最后工具 / turn 结果）；
     看板/matrix/画布新增「失败」列；产出列与抽屉「文件区 + 对话区」换成真数据；
     画布偏好改存 Host（`~/.dsh/command-centre/canvas.json`，路由 `/api/command-centre.prefs`），跨重启保持
+  - `v0.8.0` 画布：连线加粗+主题色+选中链路高亮、滚轮直接缩放（Shift+滚轮平移）、去掉「子树」范围开关；
+    产出文件可点开面板内预览（文本/代码/图片 + 在桌面打开，走 `remote.workspaceFiles` / `remote.session.openWorkspacePath`）；
+    新增 ⚙ 设置：默认界面 / 安静模式默认开 / 记住上次界面（存 Host prefs）
 
 ## 关键结论 / 踩过的坑
 

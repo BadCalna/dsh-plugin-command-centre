@@ -132,6 +132,13 @@ const ctx = {
     },
   },
   sessions: { refreshProjections: () => Promise.resolve() },
+  inject: (_deps, callback) =>
+    callback({
+      remote: {
+        workspaceFiles: { read: async () => ({ text: 'preview', lines: ['preview'], eof: true }) },
+        session: { openWorkspacePath: async () => ({ opened: true }) },
+      },
+    }),
   layout: {
     panelInfo: { getSnapshot: () => ({ activePanelId: null }) },
     selectPanel: (id) => panelSelections.push(id),
@@ -453,6 +460,37 @@ const failedDrawer = render(expandPanel());
 assert(failedDrawer.includes('migrate.log'), 'drawer file zone lists projected files');
 assert(failedDrawer.includes('结束原因') && failedDrawer.includes('error'), 'drawer shows the turn outcome');
 
+// ---- settings panel: default view choice ----
+let settingsTree = expandPanel();
+const gear = findFirst(settingsTree, (node) => node.type === 'button' && node.children && node.children[0] === '⚙');
+assert(gear, 'settings button rendered in the header');
+gear.props.onClick(fakeEvent);
+settingsTree = expandPanel();
+assert(countClass(settingsTree, 'mc-settings') === 1, 'settings overlay opens');
+const settingsText = render(settingsTree);
+assert(settingsText.includes('默认界面') && settingsText.includes('记住上次界面'), 'settings expose the default view and view memory');
+const settingsRoot = findFirst(settingsTree, (node) => node.props && typeof node.props.className === 'string' && node.props.className.includes('mc-settings'));
+assert(settingsRoot, 'settings overlay element found');
+const closeSettings = findFirst(settingsRoot, (node) => node.type === 'button' && node.children && node.children[0] === '✕');
+assert(closeSettings, 'settings overlay has a close button');
+closeSettings.props.onClick(fakeEvent);
+settingsTree = expandPanel();
+assert(countClass(settingsTree, 'mc-settings') === 0, 'settings overlay closes');
+
+// ---- file preview from the projected file list ----
+let previewTree = expandPanel();
+const fileRow = findFirst(previewTree, (node) => node.type === 'li' && node.props && typeof node.props.className === 'string' && node.props.className.includes('mc-itemLink'));
+assert(fileRow, 'drawer file rows are clickable');
+fileRow.props.onClick(fakeEvent);
+previewTree = expandPanel();
+assert(countClass(previewTree, 'mc-preview') === 1, 'clicking a projected file opens the preview overlay');
+const previewText = render(previewTree);
+assert(previewText.includes('在桌面打开') && previewText.includes('migrate.log'), 'preview offers native open and names the file');
+const previewRoot = findFirst(previewTree, (node) => node.props && node.props.className === 'mc-preview');
+assert(previewRoot, 'preview overlay element found');
+const closePreview = findFirst(previewRoot, (node) => node.type === 'button' && node.children && node.children[0] === '✕');
+assert(closePreview, 'preview overlay has a close button');
+
 // ---- canvas view ----
 function expandPanel() {
   resetHooks();
@@ -467,7 +505,8 @@ function nodeText(node) {
 function countClass(node, className) {
   if (!node || typeof node !== 'object') return 0;
   if (Array.isArray(node)) return node.reduce((sum, child) => sum + countClass(child, className), 0);
-  let total = node.props && node.props.className === className ? 1 : 0;
+  const classes = node.props && typeof node.props.className === 'string' ? node.props.className.split(/\s+/) : [];
+  let total = classes.includes(className) ? 1 : 0;
   for (const child of node.children || []) total += countClass(child, className);
   return total;
 }
@@ -544,17 +583,7 @@ assert(/ C /.test(edgePath().props.d), 'curve edges use a cubic bezier');
 clickLabel('直角');
 assert(/H .* V /.test(edgePath().props.d), 'orthogonal edges use H/V segments');
 
-clickLabel('子树');
-assert(countClass(tree, 'mc-node') === 3, 'subtree scope draws only the focused case');
-const scopedNodes = [];
-(function walkNodes(node) {
-  if (!node || typeof node !== 'object') return;
-  if (Array.isArray(node)) { for (const child of node) walkNodes(child); return; }
-  if (node.props && node.props.className === 'mc-node') scopedNodes.push(nodeText(node));
-  for (const child of node.children || []) walkNodes(child);
-})(tree);
-assert(scopedNodes.some((text) => text.includes('修复登录超时')), 'subtree scope keeps the focused root');
-assert(!scopedNodes.some((text) => text.includes('重构支付模块')), 'subtree scope drops other roots');
+// (the subtree scope switch was removed: it did not earn its place for one-level trees)
 
 // ---- canvas node dragging ----
 function canvasElement(node) {
