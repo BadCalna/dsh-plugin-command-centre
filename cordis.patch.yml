@@ -1,4 +1,4 @@
 # Adds only the Mission Control row. Host half is intentionally empty (V1a is pure Client).
 - insert:
     - id: mission-control
-      name: '@local/dsh-plugin-mission-control'
+      name: 'dsh-plugin-command-centre'

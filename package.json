@@ -1,0 +1,58 @@
+{
+  "name": "dsh-plugin-command-centre",
+  "version": "0.3.0",
+  "description": "Command Centre for DeepSeek Harness: a cyberpunk mission-control board for every task's progress, subagent tree and output (read-only V1a).",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "mission-control",
+    "kanban",
+    "dashboard",
+    "cyberpunk",
+    "web-ui"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BadCalna/dsh-plugin-command-centre.git"
+  },
+  "homepage": "https://github.com/BadCalna/dsh-plugin-command-centre#readme",
+  "bugs": {
+    "url": "https://github.com/BadCalna/dsh-plugin-command-centre/issues"
+  },
+  "author": "BadCalna",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

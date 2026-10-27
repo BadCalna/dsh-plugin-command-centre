@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const PLUGIN = path.join(__dirname, '..', 'plugin');
+const PLUGIN = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(PLUGIN, 'client.js'), 'utf8');
 
 let hookIndex = 0;
@@ -86,7 +86,7 @@ function assert(condition, message) {
 
 assert(loaded.length === 1, 'exactly one module factory registered');
 const definition = loaded[0];
-assert(definition.id === '@local/dsh-plugin-mission-control', 'module id equals the package name');
+assert(definition.id === require('../package.json').name, 'module id equals the package name');
 assert(typeof definition.factory === 'function', 'factory is a function');
 
 const plugin = definition.factory((name) => {

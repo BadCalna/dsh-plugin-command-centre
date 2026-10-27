@@ -13,7 +13,7 @@
  * output slot renders an explicit placeholder instead of guessing.
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-plugin-mission-control',
+  id: 'dsh-plugin-command-centre',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
