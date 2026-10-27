@@ -33,10 +33,13 @@
 ## 能做什么
 
 - **看板（默认）**：`需要你` / `运行中` / `空闲` 三列，列头带 `CH-0N` 编号与计数；按 `v` 切到矩阵视图
-- **卡片**：状态点、标题、工作区、`AGENTS 主+2子`（含活跃数）、`CTX 62%`、todo 分段进度、最后活动、`OUT —`
+- **卡片**：状态点、标题、工作区、`AGENTS 主+2子`（含活跃数）、`CTX 62%`、todo 分段进度、最后活动、
+  **产出码**（`OUT 2F` = 写了 2 个文件 / `TXT` = 有回答 / `ERR` = 出错，悬停看内容）
+- **四个看板列**：需要你 / 运行中 / **失败** / 空闲；失败来自宿主的 `turn/end.reason`
+  （`error` / `blocked` / `max-tokens`）
 - **subagent**：卡片内嵌第一层子 agent（`−N` 收起 / `+N` 展开 / 更深层显示 `+N` 计数）
 - **需要你横幅**：审批 / 计划审核 / 提问被顶到最上方，处理完自动消失
-- **详情抽屉**：概览 / 目标（goal）/ 团队（agentTeam 成员与共享任务）/ todo 全量 / 子任务 / 产出区
+- **详情抽屉**：概览 / 目标（goal）/ 团队 / todo 全量 / 子任务 / **产出区（文件区 + 对话区，真实数据）**
 - **跳转**：`打开对话` 回到 Conversation（`↗`、双击卡片、`o`）
 - **快捷键**：`⌘⇧P`（Windows / Linux 为 `Ctrl+Shift+P`）打开 / 返回面板；可在 **设置 → 快捷键** 改键
 - **节点式画布**：`v` 切到「画布」，任务变成节点、父子关系连线，单子节点不换行；
@@ -92,8 +95,8 @@ link:/absolute/path/to/dsh-plugin-command-centre
 
 ## 它现在**不做**什么
 
-- **产出**列显示 `OUT —`：文件写入 / 最后回答需要宿主侧投影，V1b 才做
-- **没有「失败」列**：Client 侧拿不到跨会话失败信号（`turn/end.reason` 需要 Host 投影）
+- **产出是折叠来的、不是 diff**：`files` 来自 `tool/call` 里 `write`/`edit` 的 `file_path`（最近 5 个，
+  计数是累计写入次数），不是 git 级别的改动列表；最后回答截断到 200 字符
 - **只读**：批准 / 回答 / 打断都不做
 - **不持久化面板选中态**：刷新回对话页，所以给了 `⌘⇧P`
 - **不支持拖拽改状态**：状态来自宿主投影，拖了也没地方写
@@ -124,7 +127,7 @@ link:/absolute/path/to/dsh-plugin-command-centre
 
 ```
 client.js            # 全部 UI + 数据派生 + 快捷键
-index.js             # Host half（V1a 为空 apply；Client half 靠这条 loader row 下发）
+index.js             # Host half：missionControl 投影 + canvas 偏好持久化路由
 cordis.patch.yml     # 插入一条 id: mission-control 的插件行
 locale/{zh,en}.json  # 插件管理页展示用的 meta（运行时词典在 client.js）
 icon.svg             # 侧栏 + 插件页图标

@@ -1,6 +1,6 @@
 # STATUS — Command Centre
 
-> 最后更新：2026-10-27 · v0.6.0（节点画布：默认纵+直角，位置记忆）。
+> 最后更新：2026-10-27 · v0.7.0（V1b：产出投影 + 失败列 + Host 侧持久化）。
 
 ## 现在是什么状态
 
@@ -18,6 +18,9 @@
   - `v0.5.0` 画布布局开关：方向（横/纵）、范围（全部/子树）、连线（曲线/直角）；冒烟测试覆盖三种切换
   - `v0.5.1` 画布可用性修复：节点可拖（边/簇框跟随、↺ 重置）、空白拖拽平移、点击不误选；子树范围改为按选中节点回溯（之前按根，只有一个根时无效）
   - `v0.6.0` 画布默认改 纵+直角；方向/范围/连线 + 手动位置存 localStorage（250ms 防抖，刷新保持，↺ 清空）
+  - `v0.7.0` **V1b**：Host 投影 `missionControl`（最后回答 200 字 / 写入文件最近 5 个+次数 / 最后工具 / turn 结果）；
+    看板/matrix/画布新增「失败」列；产出列与抽屉「文件区 + 对话区」换成真数据；
+    画布偏好改存 Host（`~/.dsh/command-centre/canvas.json`，路由 `/api/command-centre.prefs`），跨重启保持
 
 ## 关键结论 / 踩过的坑
 
@@ -32,21 +35,24 @@
 | Host half | `index.js` 改动必须重启 App 才会加载新模块；纯 Client 改动 `⌘R` 即可 |
 | 投影是权威 | `useSessions(s=>s)` 的 `byId` 已含 subagent 子行（`parentId`/`origin`），不需要自己爬 tree |
 
-## 下一步：V1b（产出列 + 失败列）
+## V1b 已落地（v0.7.0）
 
-一个 Host 投影 `missionControl`（小 JSON，别放大文本）：
+Host 投影 `missionControl`（`stateVersion: 1`）：`text`（≤200 字符）/ `files`（最近 5 个写入路径）/
+`fileCount`（累计写入次数）/ `tool` / `toolError` / `turn` / `reason`（`turn/end.reason.kind`）。
+Client 用它做产出列（`2F`/`TXT`/`ERR`）、抽屉「文件区 + 对话区」、失败列。
 
-| 字段 | fold 来源 | 用途 |
-|---|---|---|
-| `changedFiles`（count + 最近 3 个 path） | `workspace/changes` | 卡片 `OUT` + 抽屉「产出 · 文件区」 |
-| `lastAssistantText`（截断 ≤200 字符） | `assistant/message` | 卡片摘要 + 抽屉「产出 · 对话区」 |
-| `lastToolName` / `lastToolError` | `tool/call`、`tool/result` | 抽屉「最近活动」 |
-| `turn` / `lastTurnEndReason` | `turn/start`、`turn/end` | 新增「失败」看板列（`blocked/error/max-tokens`） |
+已知取舍：
+- `files` 来自 `tool/call` 中 `write`/`edit` 的 `file_path`，不是 diff，也不是 `workspace/changes` 的权威列表
+- 投影会进所有 Client 的 control baseline，所以只放截断文本/计数/枚举；语义变了要 bump `stateVersion`
+- 画布偏好走 Host 路由（`/api/command-centre.prefs`）写 `~/.dsh/command-centre/canvas.json`，
+  localStorage 仅兜底；App 重启后 origin 变了也能恢复
 
-顺序：先 `changedFiles` + `lastAssistantText` → 装（改 Host half 需重启 App）→ 确认
-`projectionsBySession[id].values.missionControl` 真的到 Client → 再补 `turn end reason` 做失败列。
+## 下一步候选
 
-约束：`stateVersion: 1` 起步，语义变了必须 bump；control baseline 广播给所有 Client，只放计数/枚举/截断文本。
+1. 画布 P1：节点折叠 `+N`、键盘 DFS 提示、节点内联展开
+2. 产出更准：接 `ctx.workspaceChanges.summary` / `/api/changes.summary` 拿真实 turn 改动
+3. workflow 阶段节点（仍缺 Host 事件投影，需要 fold `tool-workflow/*` 会话事件）
+4. V2：动作通道（批准 / 回答 / 打断）
 
 ## 已知未做（别当 bug）
 

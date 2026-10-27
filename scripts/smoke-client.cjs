@@ -80,6 +80,8 @@ sandbox.globalThis = sandbox;
 require('vm').createContext(sandbox);
 require('vm').runInContext(source, sandbox, { filename: 'client.js' });
 
+const fakeEvent = { stopPropagation() {}, preventDefault() {} };
+
 function assert(condition, message) {
   if (!condition) throw new Error(`ASSERT: ${message}`);
 }
@@ -231,6 +233,15 @@ function render(node) {
 const now = Date.now();
 const projection = {
   a: {
+    missionControl: {
+      text: '已定位 auth 中间件超时，正在补回归测试',
+      tool: 'write',
+      toolError: '',
+      turn: 5,
+      reason: 'completed',
+      files: ['notes/auth.md', 'tests/test_auth.py'],
+      fileCount: 2,
+    },
     todos: [
       { content: '定位 auth 中间件', status: 'completed' },
       { content: '跑 pytest', status: 'in_progress' },
@@ -245,6 +256,17 @@ const projection = {
   },
   a1: { subagentTiming: { settledMs: 240000, lastTurnCompleted: true } },
   a2: { subagentTiming: { active: { since: now - 180000, through: now - 60000 } } },
+  c: {
+    missionControl: {
+      text: '迁移失败：SQL 语法错误',
+      tool: 'bash',
+      toolError: 'FS_NOT_FOUND',
+      turn: 3,
+      reason: 'error',
+      files: ['migrate.log'],
+      fileCount: 1,
+    },
+  },
   b: {
     goal: { goal: { objective: '重构支付模块', phase: 'active' }, roundsStarted: 2 },
     agentTeam: {
@@ -256,7 +278,7 @@ const projection = {
 
 const list = {
   phase: 'ready',
-  ids: ['a', 'b'],
+  ids: ['a', 'b', 'c'],
   byId: {
     a: {
       id: 'a',
@@ -294,6 +316,14 @@ const list = {
       updatedAt: now - 300000,
       projectionValues: projection.b,
     },
+    c: {
+      id: 'c',
+      displayTitle: '迁移脚本 review',
+      running: false,
+      blank: false,
+      updatedAt: now - 7200000,
+      projectionValues: projection.c,
+    },
   },
   projectionsBySession: Object.fromEntries(Object.entries(projection).map(([id, values]) => [id, { values, state: 'ready', error: null }])),
 };
@@ -302,6 +332,7 @@ const statuses = new Map([
   ['a1', { running: false, pendingInteraction: undefined, completionUnread: true }],
   ['a2', { running: true, pendingInteraction: undefined, completionUnread: false }],
   ['b', { running: false, pendingInteraction: { kind: 'approval' }, completionUnread: false }],
+  ['c', { running: false, pendingInteraction: undefined, completionUnread: false }],
 ]);
 const workspaces = {
   items: [
@@ -331,6 +362,8 @@ const expectations = [
   ['board card class', 'mc-board'],
   ['card class', 'mc-card'],
   ['view toggle', '看板'],
+  ['failed column', '失败'],
+  ['output code', 'OUT 2F'],
   ['running task', '修复登录超时'],
   ['pending task', '重构支付模块'],
   ['needs banner', '需要你'],
@@ -411,8 +444,16 @@ assert(drawerText.includes('子任务'), 'drawer subagents section renders');
 assert(drawerText.includes('产出'), 'drawer output section renders');
 assert(!/undefined|NaN|\[object Object\]/.test(drawerText), 'drawer output has no undefined/NaN/[object Object]');
 
+// ---- drawer output from the Host projection ----
+const outputTree = expandPanel();
+const failedCard = findFirst(outputTree, (node) => node.type === 'div' && node.props && node.props.className === 'mc-card' && nodeText(node).includes('迁移脚本 review'));
+assert(failedCard, 'failed task card rendered');
+failedCard.props.onClick(fakeEvent);
+const failedDrawer = render(expandPanel());
+assert(failedDrawer.includes('migrate.log'), 'drawer file zone lists projected files');
+assert(failedDrawer.includes('结束原因') && failedDrawer.includes('error'), 'drawer shows the turn outcome');
+
 // ---- canvas view ----
-const fakeEvent = { stopPropagation() {}, preventDefault() {} };
 function expandPanel() {
   resetHooks();
   return expand(React.createElement(main.component, panelProps));
@@ -438,11 +479,11 @@ canvasButton.props.onClick(fakeEvent);
 
 tree = expandPanel();
 assert(countClass(tree, 'mc-canvas') === 1, 'canvas container renders');
-assert(countClass(tree, 'mc-node') === 4, 'canvas renders one node per session (2 roots + 2 subagents)');
+assert(countClass(tree, 'mc-node') === 5, 'canvas renders one node per session (3 roots + 2 subagents)');
 assert(countClass(tree, 'mc-edge') === 2, 'canvas renders one edge per parent link');
-assert(countClass(tree, 'mc-cluster') === 2, 'canvas groups each root subtree in a cluster');
+assert(countClass(tree, 'mc-cluster') === 3, 'canvas groups each root subtree in a cluster');
 const canvasText = render(tree);
-for (const [label, needle] of [['node title', '修复登录超时'], ['subagent node', '定位超时'], ['canvas hint', '拖拽平移']]) {
+for (const [label, needle] of [['node title', '修复登录超时'], ['subagent node', '定位超时'], ['canvas hint', '拖拽平移'], ['node output', 'OUT 2F']]) {
   assert(canvasText.includes(needle), `canvas ${label} rendered`);
 }
 const badCanvas = canvasText.match(/.{0,60}(undefined|NaN|\[object Object\]).{0,60}/);
@@ -486,7 +527,7 @@ function edgePath() {
   return findFirst(tree, (node) => node.type === 'path' && node.props && node.props.className === 'mc-edge');
 }
 
-assert(countClass(tree, 'mc-node') === 4, 'all-scope canvas draws every task');
+assert(countClass(tree, 'mc-node') === 5, 'all-scope canvas draws every task');
 const boxesTb = JSON.stringify(nodeBoxes());
 assert(/H .* V /.test(edgePath().props.d), 'default edges are orthogonal');
 

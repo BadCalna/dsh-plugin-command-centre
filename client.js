@@ -27,12 +27,13 @@ window.__ModuleLoader__.load({
     const ZH = {
       panel: 'Command Centre',
       title: 'Command Centre',
-      count: { running: '运行', needs: '待你', idle: '空闲', child: '子' },
+      count: { running: '运行', needs: '待你', failed: '失败', idle: '空闲', child: '子' },
       metric: { agents: 'AGENTS', context: 'CTX', output: 'OUT' },
-      group: { needs: '需要你', running: '运行中', idle: '空闲' },
+      group: { needs: '需要你', running: '运行中', failed: '失败', idle: '空闲' },
       groupEmpty: {
         needs: '没有在等你的任务',
         running: '当前没有运行中的任务',
+        failed: '没有失败的任务',
         idle: '没有空闲任务',
       },
       view: { board: '看板', list: '矩阵', canvas: '画布' },
@@ -45,7 +46,7 @@ window.__ModuleLoader__.load({
         output: '产出',
       },
       outputPlaceholder: '—',
-      outputHint: '产出列在 V1b 补齐：文件区（改动文件）+ 对话区（最后回答）',
+      outputHint: '产出：本会话写入的文件 + 最后一段回答（由 Host 投影提供）',
       kind: { approval: '待批准', 'plan-review': '待审计划', question: '待回答' },
       status: { running: '运行中', needs: '等你处理', idle: '空闲', done: '有结果未读' },
       ago: '前',
@@ -62,8 +63,6 @@ window.__ModuleLoader__.load({
         progress: '进度',
         subagents: '子任务',
         output: '产出',
-        fileZone: '文件区',
-        dialogZone: '对话区',
         pending: '等你处理',
         workspace: '工作区',
         tokens: 'Tokens',
@@ -81,7 +80,13 @@ window.__ModuleLoader__.load({
         settled: '已结束',
         active: '已跑',
         unread: '有新结果',
-        comingV1b: 'V1b 接入后显示',
+        files: '文件区',
+        dialogue: '对话区',
+        noFiles: '还没有写入文件',
+        noText: '还没有回复',
+        lastTool: '最近工具',
+        reason: '结束原因',
+        outputPending: '产出投影接入中（Host 未加载）',
       },
       action: { open: '打开对话', openParent: '打开父对话', close: '关闭', refresh: '刷新', canvas: '在画布中聚焦' },
       filter: { all: '全部', active: '只看活跃', needs: '只看待你' },
@@ -124,12 +129,13 @@ window.__ModuleLoader__.load({
     const EN = {
       panel: 'Command Centre',
       title: 'Command Centre',
-      count: { running: 'running', needs: 'waiting', idle: 'idle', child: 'sub' },
+      count: { running: 'running', needs: 'waiting', failed: 'failed', idle: 'idle', child: 'sub' },
       metric: { agents: 'AGENTS', context: 'CTX', output: 'OUT' },
-      group: { needs: 'Needs you', running: 'Running', idle: 'Idle' },
+      group: { needs: 'Needs you', running: 'Running', failed: 'Failed', idle: 'Idle' },
       groupEmpty: {
         needs: 'Nothing is waiting for you',
         running: 'Nothing is running right now',
+        failed: 'No failed tasks',
         idle: 'No idle tasks',
       },
       view: { board: 'Board', list: 'Matrix', canvas: 'Canvas' },
@@ -142,7 +148,7 @@ window.__ModuleLoader__.load({
         output: 'Output',
       },
       outputPlaceholder: '—',
-      outputHint: 'Output lands in V1b: file zone (changed files) + dialogue zone (last answer)',
+      outputHint: 'Output: files written by this session + its last answer (Host projection)',
       kind: { approval: 'Needs approval', 'plan-review': 'Plan review', question: 'Question' },
       status: { running: 'Running', needs: 'Waiting for you', idle: 'Idle', done: 'Unread result' },
       ago: 'ago',
@@ -159,8 +165,6 @@ window.__ModuleLoader__.load({
         progress: 'Progress',
         subagents: 'Subagents',
         output: 'Output',
-        fileZone: 'Files',
-        dialogZone: 'Dialogue',
         pending: 'Waiting for you',
         workspace: 'Workspace',
         tokens: 'Tokens',
@@ -178,7 +182,13 @@ window.__ModuleLoader__.load({
         settled: 'settled',
         active: 'ran',
         unread: 'new result',
-        comingV1b: 'Available in V1b',
+        files: 'Files',
+        dialogue: 'Dialogue',
+        noFiles: 'No files written yet',
+        noText: 'No answer yet',
+        lastTool: 'Last tool',
+        reason: 'Turn outcome',
+        outputPending: 'Output projection not loaded by the Host yet',
       },
       action: { open: 'Open conversation', openParent: 'Open parent', close: 'Close', refresh: 'Refresh', canvas: 'Focus in canvas' },
       filter: { all: 'All', active: 'Active', needs: 'Waiting' },
@@ -327,6 +337,44 @@ window.__ModuleLoader__.load({
       return sum > 0 ? sum : undefined;
     }
 
+    const FAILED_OUTCOMES = new Set(['error', 'blocked', 'max-tokens']);
+
+    /** Read the Host `missionControl` projection into the UI shape we render. */
+    function outputOf(values) {
+      const raw = values && values.missionControl;
+      if (!raw || typeof raw !== 'object') return undefined;
+      const files = Array.isArray(raw.files) ? raw.files.filter((entry) => typeof entry === 'string' && entry !== '') : [];
+      const reason = typeof raw.reason === 'string' ? raw.reason : '';
+      return {
+        files,
+        fileCount: Number.isInteger(raw.fileCount) && raw.fileCount > 0 ? raw.fileCount : files.length,
+        text: typeof raw.text === 'string' ? raw.text : '',
+        tool: typeof raw.tool === 'string' ? raw.tool : '',
+        toolError: typeof raw.toolError === 'string' ? raw.toolError : '',
+        turn: Number.isInteger(raw.turn) ? raw.turn : 0,
+        reason,
+        failed: FAILED_OUTCOMES.has(reason),
+      };
+    }
+
+    /** Compact code for the output cell: files first, then answer text, then error. */
+    function outputCode(output) {
+      if (!output) return undefined;
+      if (output.files.length > 0 || output.fileCount > 0) return `${Math.max(output.files.length, output.fileCount)}F`;
+      if (output.text) return 'TXT';
+      if (output.toolError || output.failed) return 'ERR';
+      return undefined;
+    }
+
+    function outputTitle(output, t) {
+      if (!output) return t('drawer.outputPending');
+      const parts = [];
+      if (output.files.length > 0) parts.push(output.files.join('\n'));
+      if (output.text) parts.push(output.text);
+      if (output.toolError) parts.push(`${t('drawer.lastTool')}: ${output.toolError}`);
+      return parts.length > 0 ? parts.join('\n\n') : t('drawer.noFiles');
+    }
+
     function timingOf(values, rowRunning) {
       const timing = values && values.subagentTiming;
       if (!timing) return undefined;
@@ -381,6 +429,7 @@ window.__ModuleLoader__.load({
           context: contextOf(values),
           tokens: tokenTotal(values),
           timing: timingOf(values, running),
+          output: outputOf(values),
           children: (childrenByParent.get(row.id) || []).slice(),
         };
         views.set(row.id, view);
@@ -390,6 +439,7 @@ window.__ModuleLoader__.load({
       const groupOf = (view) => {
         if (view.pending) return 'needs';
         if (view.running) return 'running';
+        if (view.output && view.output.failed) return 'failed';
         return 'idle';
       };
       return { list, roots: rootSorted.map(viewOf), views, childrenByParent, viewOf, groupOf };
@@ -412,7 +462,7 @@ window.__ModuleLoader__.load({
 
     /** Group roots for the board / matrix; a filtered-out parent keeps its children hidden. */
     function groupedRoots(model, filter, query, workspaceFilter) {
-      const groups = { needs: [], running: [], idle: [] };
+      const groups = { needs: [], running: [], failed: [], idle: [] };
       for (const root of model.roots) {
         if (!matchQuery(root, query) && !root.children.some((child) => matchQuery(model.viewOf(child), query))) continue;
         if (workspaceFilter !== 'all' && (root.workspace || '') !== workspaceFilter) continue;
@@ -431,7 +481,7 @@ window.__ModuleLoader__.load({
         if (expanded[view.id] === false) return;
         for (const child of orderedChildren(view)) pushTree(model.viewOf(child));
       };
-      for (const group of ['needs', 'running', 'idle']) for (const view of groups[group]) pushTree(view);
+      for (const group of ['needs', 'running', 'failed', 'idle']) for (const view of groups[group]) pushTree(view);
       return ids;
     }
 
@@ -463,6 +513,7 @@ window.__ModuleLoader__.load({
     function stateOf(view) {
       if (view.pending) return 'needs';
       if (view.running) return 'running';
+      if (view.output && view.output.failed) return 'failed';
       if (view.unread) return 'done';
       return 'idle';
     }
@@ -522,9 +573,11 @@ body[data-ds-dark-theme] .mc-title{text-shadow:0 0 18px color-mix(in srgb,var(--
 .mc-stat{display:flex;flex-direction:column;align-items:flex-start;gap:0;min-width:52px;padding:2px 10px 3px;border:0;border-bottom:1px solid var(--cc-hair);background:transparent}
 .mc-stat[data-tone=run]{border-bottom-color:color-mix(in srgb,var(--mc-run) 60%,var(--cc-hair))}
 .mc-stat[data-tone=needs]{border-bottom-color:color-mix(in srgb,var(--mc-warn) 60%,var(--cc-hair))}
+.mc-stat[data-tone=failed]{border-bottom-color:color-mix(in srgb,var(--mc-err) 60%,var(--cc-hair))}
 .mc-statNum{font-family:var(--mc-mono);font-size:15px;font-weight:600;line-height:18px;color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums slashed-zero;letter-spacing:.01em}
 .mc-stat[data-tone=run] .mc-statNum{color:var(--cc-ink-run)}
 .mc-stat[data-tone=needs] .mc-statNum{color:var(--cc-ink-warn)}
+.mc-stat[data-tone=failed] .mc-statNum{color:var(--cc-ink-err)}
 .mc-statLabel{font-family:var(--mc-mono);font-size:8.5px;line-height:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}
 .mc-headSpacer{flex:1 1 auto;min-width:8px}
 .mc-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -557,13 +610,14 @@ body[data-ds-dark-theme] .mc-title{text-shadow:0 0 18px color-mix(in srgb,var(--
 .mc-body::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(100deg,transparent 42%,color-mix(in srgb,var(--cc-accent) 9%,transparent) 50%,transparent 58%);transform:translateX(-120%);animation:mc-scan 9s linear infinite}
 @keyframes mc-scan{0%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 .mc-board,.mc-matrix{position:relative;z-index:1}
-.mc-board{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(232px,1fr));gap:10px;overflow-x:auto;overflow-y:hidden;padding-bottom:2px}
+.mc-board{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(4,minmax(204px,1fr));gap:10px;overflow-x:auto;overflow-y:hidden;padding-bottom:2px}
 .mc-col{min-width:0;display:flex;flex-direction:column;min-height:0;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 52%,transparent);position:relative}
 .mc-col::after{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,var(--mc-col-accent,var(--cc-hair)),transparent 72%)}
 .mc-col[data-state=needs]{--mc-col-accent:var(--mc-warn)}
 .mc-col[data-state=running]{--mc-col-accent:var(--mc-run)}
 .mc-col[data-state=running]::after{background:linear-gradient(90deg,transparent,var(--mc-run),transparent);background-size:38% 100%;background-repeat:no-repeat;animation:mc-col-scan 3.6s linear infinite}
 @keyframes mc-col-scan{0%{background-position:-40% 0}100%{background-position:140% 0}}
+.mc-col[data-state=failed]{--mc-col-accent:var(--mc-err)}
 .mc-col[data-state=idle]{--mc-col-accent:var(--mc-idle)}
 .mc-colHead{flex:none;display:flex;align-items:center;gap:8px;padding:9px 10px 7px;border-bottom:1px solid var(--cc-hair);position:relative;--cut:11px;clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
 .mc-colIndex{font-family:var(--mc-mono);font-size:8.5px;letter-spacing:.12em;color:var(--dsw-alias-label-tertiary);border:1px solid var(--cc-hair);padding:0 4px;line-height:13px;border-radius:1px}
@@ -586,6 +640,7 @@ body[data-ds-dark-theme] .mc-title{text-shadow:0 0 18px color-mix(in srgb,var(--
 .mc-card[data-state=running]{--mc-card-accent:var(--mc-run);animation:mc-card-in .18s cubic-bezier(.2,.8,.2,1) both,mc-live 3.2s ease-in-out infinite}
 @keyframes mc-live{0%,100%{box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 5%,transparent),0 0 0 1px color-mix(in srgb,var(--mc-run) 10%,transparent)}50%{box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 5%,transparent),0 0 0 1px color-mix(in srgb,var(--mc-run) 34%,transparent),0 0 22px -10px var(--mc-run)}}
 .mc-card[data-state=done]{--mc-card-accent:var(--mc-ok)}
+.mc-card[data-state=failed]{--mc-card-accent:var(--mc-err)}
 .mc-card[data-state=idle]{--mc-card-accent:var(--mc-idle)}
 .mc-card::before,.mc-card::after{content:"";position:absolute;width:9px;height:9px;pointer-events:none;border:1px solid var(--cc-hair-hi);opacity:.5;transition:opacity .12s linear,border-color .12s linear}
 .mc-card::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
@@ -714,6 +769,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-node:hover{border-color:color-mix(in srgb,var(--cc-accent) 45%,var(--cc-hair))}
 .mc-node[data-selected=true]{border-color:var(--cc-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--cc-accent) 40%,transparent),0 0 24px -14px var(--cc-accent)}
 .mc-node[data-state=needs]{border-color:color-mix(in srgb,var(--mc-warn) 52%,var(--cc-hair))}
+.mc-node[data-state=failed]{border-color:color-mix(in srgb,var(--mc-err) 55%,var(--cc-hair))}
 .mc-node[data-state=running]{box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent),0 0 0 1px color-mix(in srgb,var(--mc-run) 24%,transparent)}
 .mc-node:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:1px}
 .mc-nodeKind{flex:none;font-family:var(--mc-mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);border:1px solid var(--cc-hair);padding:0 4px;line-height:12px;border-radius:1px}
@@ -723,7 +779,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-canvasHint{position:absolute;left:10px;bottom:12px;z-index:3;color:var(--dsw-alias-label-tertiary);font-family:var(--mc-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;pointer-events:none}
 .mc-canvasEmpty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:11px;font-family:var(--mc-mono);letter-spacing:.08em;text-transform:uppercase}
 
-@media (max-width:980px){.mc-board{grid-template-columns:repeat(3,minmax(206px,1fr))}.mc-headRow,.mc-row{grid-template-columns:20px minmax(0,1fr) 78px 110px 52px 26px}.mc-colCtx,.mc-colOut{display:none}}
+@media (max-width:980px){.mc-board{grid-template-columns:repeat(4,minmax(186px,1fr))}.mc-headRow,.mc-row{grid-template-columns:20px minmax(0,1fr) 78px 110px 52px 26px}.mc-colCtx,.mc-colOut{display:none}}
 @media (max-width:720px){.mc-board{grid-template-columns:1fr;overflow-y:auto}}
 @media (prefers-reduced-motion:reduce){
   .mc-card{animation:none;transition:none}
@@ -939,7 +995,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           { className: 'mc-cardFoot' },
           h('span', null, h(RelativeTime, { view, now, t })),
           h('span', { className: 'mc-cardFootSpacer' }),
-          h('span', { title: t('outputHint') }, `${t('metric.output')} ${t('outputPlaceholder')}`),
+          h('span', { title: outputTitle(view.output, t) }, `${t('metric.output')} ${outputCode(view.output) || t('outputPlaceholder')}`),
         ),
       );
     }
@@ -949,7 +1005,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       return h(
         'div',
         { className: 'mc-board', role: 'list' },
-        ['needs', 'running', 'idle'].map((state, columnIndex) =>
+        ['needs', 'running', 'failed', 'idle'].map((state, columnIndex) =>
           h(
             'section',
             { className: 'mc-col', key: state, 'data-state': state, 'aria-label': t(`group.${state}`) },
@@ -1003,8 +1059,9 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
     }
 
     const CANVAS_STORE_KEY = 'dsh.command-centre.canvas.v1';
+    const CANVAS_PREFS_ROUTE = 'api/command-centre.prefs';
 
-    function readCanvasPrefs() {
+    function readLocalCanvasPrefs() {
       try {
         if (typeof window === 'undefined' || !window.localStorage) return null;
         const raw = window.localStorage.getItem(CANVAS_STORE_KEY);
@@ -1016,12 +1073,42 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       }
     }
 
-    function writeCanvasPrefs(value) {
+    function writeLocalCanvasPrefs(value) {
       try {
         if (typeof window === 'undefined' || !window.localStorage) return;
         window.localStorage.setItem(CANVAS_STORE_KEY, JSON.stringify(value));
       } catch {
         /* private mode / quota: layout memory is best-effort */
+      }
+    }
+
+    /** Host route survives an App restart (the Web origin's port changes per launch). */
+    async function loadCanvasPrefs() {
+      try {
+        if (typeof fetch === 'function') {
+          const response = await fetch(CANVAS_PREFS_ROUTE, { headers: { accept: 'application/json' }, cache: 'no-store' });
+          if (response.ok) {
+            const body = await response.json();
+            if (body && typeof body === 'object' && !Array.isArray(body)) return body;
+          }
+        }
+      } catch {
+        /* route unavailable (older Host or no cache yet) */
+      }
+      return readLocalCanvasPrefs();
+    }
+
+    function saveCanvasPrefs(value) {
+      writeLocalCanvasPrefs(value);
+      try {
+        if (typeof fetch !== 'function') return;
+        fetch(CANVAS_PREFS_ROUTE, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(value),
+        }).catch(() => {});
+      } catch {
+        /* persistence is best-effort */
       }
     }
 
@@ -1204,14 +1291,14 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           { className: 'mc-cardFoot' },
           h('span', null, h(RelativeTime, { view, now, t })),
           h('span', { className: 'mc-cardFootSpacer' }),
-          h('span', { title: t('outputHint') }, `${t('metric.output')} ${t('outputPlaceholder')}`),
+          h('span', { title: outputTitle(view.output, t) }, `${t('metric.output')} ${outputCode(view.output) || t('outputPlaceholder')}`),
         ),
       );
     }
 
     function Canvas(props) {
       const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef } = props;
-      const stored = React.useMemo(() => readCanvasPrefs(), []);
+      const stored = React.useMemo(() => readLocalCanvasPrefs(), []);
       const [direction, setDirection] = React.useState(stored && stored.direction === 'lr' ? 'lr' : 'tb');
       const [scope, setScope] = React.useState(stored && stored.scope === 'focus' ? 'focus' : 'all');
       const [edgeStyle, setEdgeStyle] = React.useState(stored && stored.edgeStyle === 'curve' ? 'curve' : 'ortho');
@@ -1219,12 +1306,43 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         const saved = stored && stored.overrides;
         return saved && typeof saved === 'object' ? saved : {};
       });
+      const touchedRef = React.useRef(false);
+      const [hydrated, setHydrated] = React.useState(false);
+      const changeDirection = (value) => {
+        touchedRef.current = true;
+        setDirection(value);
+      };
+      const changeScope = (value) => {
+        touchedRef.current = true;
+        setScope(value);
+      };
+      const changeEdgeStyle = (value) => {
+        touchedRef.current = true;
+        setEdgeStyle(value);
+      };
+
+      React.useEffect(() => {
+        let alive = true;
+        loadCanvasPrefs().then((prefs) => {
+          if (!alive) return;
+          if (prefs && !touchedRef.current) {
+            if (prefs.direction === 'lr' || prefs.direction === 'tb') setDirection(prefs.direction);
+            if (prefs.scope === 'focus' || prefs.scope === 'all') setScope(prefs.scope);
+            if (prefs.edgeStyle === 'curve' || prefs.edgeStyle === 'ortho') setEdgeStyle(prefs.edgeStyle);
+            if (prefs.overrides && typeof prefs.overrides === 'object' && !Array.isArray(prefs.overrides)) setOverrides(prefs.overrides);
+          }
+          setHydrated(true);
+        });
+        return () => {
+          alive = false;
+        };
+      }, []);
       const overridesRef = React.useRef(overrides);
       overridesRef.current = overrides;
       const focusId = focus && focus.id ? focus.id : undefined;
       const scopeId = focusId || selectedId;
       const scopeView = scopeId ? model.views.get(scopeId) : undefined;
-      const allRoots = React.useMemo(() => ['needs', 'running', 'idle'].flatMap((state) => groups[state]), [groups]);
+      const allRoots = React.useMemo(() => ['needs', 'running', 'failed', 'idle'].flatMap((state) => groups[state]), [groups]);
       const roots = React.useMemo(() => {
         if (scope !== 'focus' || !scopeView) return allRoots;
         return [scopeView];
@@ -1277,9 +1395,11 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       );
 
       React.useEffect(() => {
-        const timer = setTimeout(() => writeCanvasPrefs({ direction, edgeStyle, scope, overrides }), 250);
+        // Never write defaults over stored preferences before hydration resolved.
+        if (!hydrated) return undefined;
+        const timer = setTimeout(() => saveCanvasPrefs({ direction, edgeStyle, scope, overrides }), 250);
         return () => clearTimeout(timer);
-      }, [direction, edgeStyle, scope, overrides]);
+      }, [hydrated, direction, edgeStyle, scope, overrides]);
 
       React.useEffect(() => {
         const key = `${focusId || 'all'}:${focus && focus.nonce ? focus.nonce : 0}:${layout.nodes.length}:${direction}:${scope}`;
@@ -1325,6 +1445,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           const id = nodeEl.getAttribute('data-node-id');
           if (!id) return;
           const base = overridesRef.current[id] || { dx: 0, dy: 0 };
+          touchedRef.current = true;
           dragRef.current = { mode: 'node', id, x: event.clientX, y: event.clientY, base, moved: false };
           setDraggingNode(true);
           try {
@@ -1433,13 +1554,13 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           h(
             'div',
             { className: 'mc-seg', role: 'group' },
-            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.lrTitle'), 'aria-pressed': direction === 'lr' ? 'true' : 'false', onClick: () => setDirection('lr') }, t('canvas.lr')),
-            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.tbTitle'), 'aria-pressed': direction === 'tb' ? 'true' : 'false', onClick: () => setDirection('tb') }, t('canvas.tb')),
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.lrTitle'), 'aria-pressed': direction === 'lr' ? 'true' : 'false', onClick: () => changeDirection('lr') }, t('canvas.lr')),
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.tbTitle'), 'aria-pressed': direction === 'tb' ? 'true' : 'false', onClick: () => changeDirection('tb') }, t('canvas.tb')),
           ),
           h(
             'div',
             { className: 'mc-seg', role: 'group' },
-            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.allScopeTitle'), 'aria-pressed': scope === 'all' ? 'true' : 'false', onClick: () => setScope('all') }, t('canvas.allScope')),
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.allScopeTitle'), 'aria-pressed': scope === 'all' ? 'true' : 'false', onClick: () => changeScope('all') }, t('canvas.allScope')),
             h(
               'button',
               {
@@ -1448,7 +1569,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
                 title: scopeView ? t('canvas.focusScopeTitle') : t('canvas.scopeNeedSelect'),
                 disabled: !scopeView,
                 'aria-pressed': scope === 'focus' ? 'true' : 'false',
-                onClick: () => setScope('focus'),
+                onClick: () => changeScope('focus'),
               },
               t('canvas.focusScope'),
             ),
@@ -1456,8 +1577,8 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           h(
             'div',
             { className: 'mc-seg', role: 'group' },
-            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.curveTitle'), 'aria-pressed': edgeStyle === 'curve' ? 'true' : 'false', onClick: () => setEdgeStyle('curve') }, t('canvas.curve')),
-            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.orthoTitle'), 'aria-pressed': edgeStyle === 'ortho' ? 'true' : 'false', onClick: () => setEdgeStyle('ortho') }, t('canvas.ortho')),
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.curveTitle'), 'aria-pressed': edgeStyle === 'curve' ? 'true' : 'false', onClick: () => changeEdgeStyle('curve') }, t('canvas.curve')),
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.orthoTitle'), 'aria-pressed': edgeStyle === 'ortho' ? 'true' : 'false', onClick: () => changeEdgeStyle('ortho') }, t('canvas.ortho')),
           ),
         ),
         h(
@@ -1564,7 +1685,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             : h('span', { className: 'mc-cell', 'data-muted': true }, '—'),
           h('span', { className: 'mc-cell mc-colCtx' }, h(ContextValue, { context: view.context })),
           h('span', { className: 'mc-cell' }, h(RelativeTime, { view, now, t })),
-          h('span', { className: 'mc-cell mc-colOut', title: t('outputHint') }, t('outputPlaceholder')),
+          h('span', { className: 'mc-cell mc-colOut', title: outputTitle(view.output, t) }, outputCode(view.output) || t('outputPlaceholder')),
           h(
             'button',
             {
@@ -1631,7 +1752,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         h(
           'div',
           { className: 'mc-matrixScroll' },
-          ['needs', 'running', 'idle'].map((group) =>
+          ['needs', 'running', 'failed', 'idle'].map((group) =>
             h(
               'div',
               { key: group },
@@ -1670,6 +1791,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       const todos = Array.isArray(values.todos) ? values.todos : [];
       const children = orderedChildren(view);
       const goalPhase = goal && goal.goal && typeof goal.goal.phase === 'string' ? goal.goal.phase : undefined;
+      const output = outputOf(values);
       return h(
         'aside',
         { className: 'mc-drawer', role: 'dialog', 'aria-label': view.title },
@@ -1709,6 +1831,12 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
                 : null,
               view.timing && view.timing.ms > 0
                 ? [h('dt', { key: 'dk' }, view.timing.live ? t('drawer.active') : t('drawer.settled')), h('dd', { key: 'dv' }, fmtDuration(view.timing.ms))]
+                : null,
+              output && output.reason
+                ? [h('dt', { key: 'rk' }, t('drawer.reason')), h('dd', { key: 'rv', style: output.failed ? { color: 'var(--cc-ink-err)' } : undefined }, output.reason)]
+                : null,
+              output && output.tool
+                ? [h('dt', { key: 'lk' }, t('drawer.lastTool')), h('dd', { key: 'lv' }, output.toolError ? `${output.tool} · ${output.toolError}` : output.tool)]
                 : null,
             ),
           ),
@@ -1827,8 +1955,41 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             'section',
             { className: 'mc-section' },
             h('div', { className: 'mc-sectionTitle' }, t('drawer.output')),
-            h('div', { className: 'mc-zone' }, h('span', { className: 'mc-zoneTitle' }, t('drawer.fileZone')), h('span', null, t('drawer.comingV1b'))),
-            h('div', { className: 'mc-zone' }, h('span', { className: 'mc-zoneTitle' }, t('drawer.dialogZone')), h('span', null, t('drawer.comingV1b'))),
+            output
+              ? h(
+                  React.Fragment,
+                  null,
+                  h(
+                    'div',
+                    { className: 'mc-zone' },
+                    h(
+                      'span',
+                      { className: 'mc-zoneTitle' },
+                      output.fileCount > 0 ? `${t('drawer.files')} · ${output.fileCount}` : t('drawer.files'),
+                    ),
+                    output.files.length > 0
+                      ? h(
+                          'ul',
+                          { className: 'mc-list' },
+                          output.files.map((file) =>
+                            h(
+                              'li',
+                              { className: 'mc-item', key: file },
+                              h('span', { className: 'mc-itemDot', 'data-status': 'completed' }),
+                              h('span', { className: 'mc-itemText', title: file }, file),
+                            ),
+                          ),
+                        )
+                      : h('span', null, t('drawer.noFiles')),
+                  ),
+                  h(
+                    'div',
+                    { className: 'mc-zone' },
+                    h('span', { className: 'mc-zoneTitle' }, t('drawer.dialogue')),
+                    h('span', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, output.text || t('drawer.noText')),
+                  ),
+                )
+              : h('div', { className: 'mc-zone' }, h('span', { className: 'mc-zoneTitle' }, t('drawer.output')), h('span', null, t('drawer.outputPending'))),
           ),
         ),
         h(
@@ -1911,7 +2072,8 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 
       const runningCount = model.roots.filter((root) => root.running && !root.pending).length;
       const needsCount = needs.length;
-      const idleCount = model.roots.filter((root) => !root.running && !root.pending).length;
+      const failedCount = model.roots.filter((root) => !root.running && !root.pending && root.output && root.output.failed).length;
+      const idleCount = model.roots.filter((root) => !root.running && !root.pending && !(root.output && root.output.failed)).length;
       const phase = list && typeof list.phase === 'string' ? list.phase : 'pending';
       const selected = selectedId ? model.views.get(selectedId) : undefined;
 
@@ -2068,6 +2230,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             { className: 'mc-telemetry', role: 'group', 'aria-label': t('column.task') },
             h('span', { className: 'mc-stat', 'data-tone': 'run' }, h('span', { className: 'mc-statNum' }, String(runningCount).padStart(2, '0')), h('span', { className: 'mc-statLabel' }, t('count.running'))),
             h('span', { className: 'mc-stat', 'data-tone': 'needs' }, h('span', { className: 'mc-statNum' }, String(needsCount).padStart(2, '0')), h('span', { className: 'mc-statLabel' }, t('count.needs'))),
+            h('span', { className: 'mc-stat', 'data-tone': 'failed' }, h('span', { className: 'mc-statNum' }, String(failedCount).padStart(2, '0')), h('span', { className: 'mc-statLabel' }, t('count.failed'))),
             h('span', { className: 'mc-stat' }, h('span', { className: 'mc-statNum' }, String(idleCount).padStart(2, '0')), h('span', { className: 'mc-statLabel' }, t('count.idle'))),
           ),
           h('div', { className: 'mc-headSpacer' }),
