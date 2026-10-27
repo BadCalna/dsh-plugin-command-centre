@@ -185,9 +185,9 @@ assert(main.options.inject().openSession && main.options.inject().refreshProject
 assert(registeredShortcuts.length === 1, 'one global shortcut registered');
 const shortcut = registeredShortcuts[0];
 assert(shortcut.id === 'mission.open', 'shortcut id');
-assert(shortcut.defaults['desktop:macos'].code === 'KeyP', 'desktop shortcut is cmd+P');
-assert(shortcut.defaults['desktop:macos'].modifiers.includes('primary'), 'desktop shortcut uses primary modifier');
-assert(shortcut.defaults['web:macos'].modifiers.includes('alt'), 'web shortcut avoids the browser print accelerator');
+assert(shortcut.defaults['desktop:macos'].code === 'KeyP', 'desktop shortcut is cmd+shift+P');
+assert(shortcut.defaults['desktop:macos'].modifiers.includes('primary') && shortcut.defaults['desktop:macos'].modifiers.includes('shift'), 'cmd+shift+P avoids the sidebar-files cmd+P');
+assert(!shortcut.defaults['desktop:macos'].modifiers.includes('alt'), 'desktop keeps a two-modifier binding');
 const decision = shortcut.resolve({ modal: null });
 assert(decision.status === 'handled' && typeof decision.run === 'function', 'shortcut resolves to a handled action');
 decision.run();

@@ -1,8 +1,8 @@
 {
   "name": "@local/dsh-plugin-mission-control",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Command Centre（任务指挥台）: 看板式一屏视图，看所有对话任务的进度、subagent 关系与产出（V1a 只读）。",
+  "description": "Command Centre（任务指挥台）: 赛博朋克仪表盘式看板，一屏看所有对话任务的进度、subagent 关系与产出（V1a 只读）。",
   "type": "module",
   "exports": {
     ".": "./index.js",
