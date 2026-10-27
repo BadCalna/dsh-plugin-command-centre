@@ -1,8 +1,8 @@
 {
   "name": "@local/dsh-plugin-mission-control",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "任务指挥台（Mission Control）: 一屏看所有对话任务的进度、subagent 关系与产出（V1a 只读）。",
+  "description": "Command Centre（任务指挥台）: 看板式一屏视图，看所有对话任务的进度、subagent 关系与产出（V1a 只读）。",
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -19,7 +19,9 @@
     "README.md"
   ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,
@@ -29,5 +31,7 @@
       ]
     }
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }

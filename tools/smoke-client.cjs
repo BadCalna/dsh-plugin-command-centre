@@ -97,10 +97,13 @@ const plugin = definition.factory((name) => {
 assert(Array.isArray(plugin.inject), 'plugin inject is an array');
 assert(!plugin.inject.includes('@deepseek-ai/dsh-client-ui-primitives'), 'no host client package injected');
 assert(plugin.inject.includes('slots') && plugin.inject.includes('layout') && plugin.inject.includes('locale'), 'core services injected');
+assert(plugin.inject.includes('sessions') && plugin.inject.includes('shortcuts'), 'session + shortcut services injected');
 
 const registered = [];
 const injectedSlots = [];
 let dictionaries = null;
+const panelSelections = [];
+const registeredShortcuts = [];
 const ctx = {
   effect(fn) {
     const disposer = fn();
@@ -127,7 +130,16 @@ const ctx = {
     },
   },
   sessions: { refreshProjections: () => Promise.resolve() },
-  layout: { selectPanel: () => {} },
+  layout: {
+    panelInfo: { getSnapshot: () => ({ activePanelId: null }) },
+    selectPanel: (id) => panelSelections.push(id),
+  },
+  shortcuts: {
+    register: (command) => {
+      registeredShortcuts.push(command);
+      return () => {};
+    },
+  },
   get: () => undefined,
 };
 
@@ -169,6 +181,17 @@ assert(main && main.options.key === 'mission', 'main registered with key "missio
 assert(entry && entry.options.id === 'mission', 'sidebar.panellist id equals main key');
 assert(entry.options.label() === dictionaries.dicts.zh.panel, 'sidebar label resolves through locale');
 assert(main.options.inject().openSession && main.options.inject().refreshProjections, 'business props injected');
+
+assert(registeredShortcuts.length === 1, 'one global shortcut registered');
+const shortcut = registeredShortcuts[0];
+assert(shortcut.id === 'mission.open', 'shortcut id');
+assert(shortcut.defaults['desktop:macos'].code === 'KeyP', 'desktop shortcut is cmd+P');
+assert(shortcut.defaults['desktop:macos'].modifiers.includes('primary'), 'desktop shortcut uses primary modifier');
+assert(shortcut.defaults['web:macos'].modifiers.includes('alt'), 'web shortcut avoids the browser print accelerator');
+const decision = shortcut.resolve({ modal: null });
+assert(decision.status === 'handled' && typeof decision.run === 'function', 'shortcut resolves to a handled action');
+decision.run();
+assert(panelSelections[panelSelections.length - 1] === 'mission', 'shortcut selects the panel when the conversation is shown');
 
 // ---- render tree with sample data ----
 function flatLookup(dict, key) {
@@ -303,7 +326,11 @@ function renderPanel() {
 
 const html = renderPanel();
 const expectations = [
-  ['panel title', '任务指挥台'],
+  ['panel title', 'Command Centre'],
+  ['board columns', '运行中'],
+  ['board card class', 'mc-board'],
+  ['card class', 'mc-card'],
+  ['view toggle', '看板'],
   ['running task', '修复登录超时'],
   ['pending task', '重构支付模块'],
   ['needs banner', '需要你'],
@@ -311,9 +338,11 @@ const expectations = [
   ['todo progress', '1/3'],
   ['context percent', '69%'],
   ['subagent child', '定位超时'],
-  ['output placeholder', '产出'],
+  ['output placeholder', 'OUT'],
   ['readonly footer', '只读视图'],
   ['filter label', '全部'],
+  ['agents metric', '主+2子'],
+  ['context metric', '69%'],
 ];
 for (const [label, needle] of expectations) {
   assert(html.includes(needle), `${label}: expected "${needle}" in render output`);
@@ -369,7 +398,7 @@ const panelProps = {
 };
 
 const expandedOnce = expand(React.createElement(main.component, panelProps));
-const row = findFirst(expandedOnce, (node) => node.type === 'div' && node.props && node.props.className === 'mc-row');
+const row = findFirst(expandedOnce, (node) => node.type === 'div' && node.props && (node.props.className === 'mc-row' || node.props.className === 'mc-card'));
 assert(row, 'row element rendered');
 row.props.onClick();
 

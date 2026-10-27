@@ -1,9 +1,9 @@
 {
   "meta": {
-    "title": "任务指挥台",
-    "description": "一屏看所有对话任务的进度、subagent 关系与产出（V1a 只读）。"
+    "title": "Command Centre",
+    "description": "任务指挥台：一屏看所有对话任务的进度、subagent 关系与产出（V1a 只读看板）。"
   },
-  "panel": "任务指挥台",
+  "panel": "Command Centre",
   "group": {
     "needs": "需要你",
     "running": "运行中",

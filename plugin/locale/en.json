@@ -1,9 +1,9 @@
 {
   "meta": {
-    "title": "Mission Control",
-    "description": "One page for every task's progress, Subagent tree and output. Read-only V1a."
+    "title": "Command Centre",
+    "description": "One board for every task's progress, subagent tree and output. Read-only V1a."
   },
-  "panel": "Mission Control",
+  "panel": "Command Centre",
   "group": {
     "needs": "Needs you",
     "running": "Running",

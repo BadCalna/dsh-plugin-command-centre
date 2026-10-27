@@ -1,7 +1,8 @@
 /**
- * Mission Control — Client half (V1a, read-only).
+ * Command Centre — Client half (V1a, read-only).
  *
- * A full-page `main` panel plus one `sidebar.panellist` entry. Everything is
+ * A full-page `main` panel, one `sidebar.panellist` entry, and a global
+ * shortcut (so a collapsed sidebar still has a way back in). Everything is
  * derived from slot props the Host already publishes:
  *   - useSessions(s => s)        list rows, parentId tree, per-session projections
  *   - useSessionStatus(m => m)   running / pendingInteraction / completionUnread
@@ -9,7 +10,7 @@
  *
  * V1a is read-only: it observes and jumps back into the Conversation. Output
  * data (files / last answer) needs a Host projection and lands in V1b, so the
- * output column renders an explicit placeholder instead of guessing.
+ * output slot renders an explicit placeholder instead of guessing.
  */
 window.__ModuleLoader__.load({
   id: '@local/dsh-plugin-mission-control',
@@ -24,16 +25,17 @@ window.__ModuleLoader__.load({
 
     // #region dictionaries
     const ZH = {
-      panel: '任务指挥台',
-      title: '任务指挥台',
-      subtitle: '一屏看所有任务',
+      panel: 'Command Centre',
+      title: 'Command Centre',
       count: { running: '运行', needs: '待你', idle: '空闲', child: '子' },
+      metric: { agents: 'AGENTS', context: 'CTX', output: 'OUT' },
       group: { needs: '需要你', running: '运行中', idle: '空闲' },
       groupEmpty: {
         needs: '没有在等你的任务',
         running: '当前没有运行中的任务',
         idle: '没有空闲任务',
       },
+      view: { board: '看板', list: '矩阵' },
       column: {
         task: '任务',
         chain: '代理链',
@@ -89,22 +91,24 @@ window.__ModuleLoader__.load({
       ungrouped: '未归组',
       loading: '读取会话中…',
       empty: '还没有任务。开一个新对话后就会出现在这里。',
-      readonly: '只读视图：这里只观察，批准/回答请打开对话',
-      footer: 'j/k 移动 · Enter 详情 · o 打开对话 · Esc 关闭 · f 过滤 · s 安静 · / 搜索',
+      readonly: '只读视图 · 批准与回答请打开对话',
+      footer: 'j/k 移动 · Enter 详情 · o 打开 · v 视图 · f 过滤 · s 安静 · / 搜索 · Esc 关闭',
       crashed: '这个面板渲染出错，已降级为空视图。',
       errors: { noStore: '会话列表不可用' },
+      shortcut: { open: '打开 / 返回 Command Centre' },
     };
     const EN = {
-      panel: 'Mission Control',
-      title: 'Mission Control',
-      subtitle: 'Every task on one screen',
+      panel: 'Command Centre',
+      title: 'Command Centre',
       count: { running: 'running', needs: 'waiting', idle: 'idle', child: 'sub' },
+      metric: { agents: 'AGENTS', context: 'CTX', output: 'OUT' },
       group: { needs: 'Needs you', running: 'Running', idle: 'Idle' },
       groupEmpty: {
         needs: 'Nothing is waiting for you',
         running: 'Nothing is running right now',
         idle: 'No idle tasks',
       },
+      view: { board: 'Board', list: 'Matrix' },
       column: {
         task: 'Task',
         chain: 'Agents',
@@ -160,10 +164,11 @@ window.__ModuleLoader__.load({
       ungrouped: 'Ungrouped',
       loading: 'Reading sessions…',
       empty: 'No tasks yet. Start a conversation and it shows up here.',
-      readonly: 'Read-only view: observe here, approve or answer inside the conversation',
-      footer: 'j/k move · Enter details · o open · Esc close · f filter · s quiet · / search',
+      readonly: 'Read-only · approve and answer inside the conversation',
+      footer: 'j/k move · Enter details · o open · v view · f filter · s quiet · / search · Esc close',
       crashed: 'This panel crashed and fell back to an empty view.',
       errors: { noStore: 'Session list unavailable' },
+      shortcut: { open: 'Open / return to Command Centre' },
     };
     // #endregion
 
@@ -194,7 +199,7 @@ window.__ModuleLoader__.load({
     function fmtDuration(ms) {
       if (!isNum(ms) || ms <= 0) return '';
       const minutes = Math.floor(ms / 60000);
-      if (minutes < 1) return ''; // caller falls back to a "just now" label
+      if (minutes < 1) return '';
       if (minutes < 60) return `${minutes}m`;
       const hours = Math.floor(minutes / 60);
       if (hours < 24) return `${hours}h`;
@@ -357,7 +362,7 @@ window.__ModuleLoader__.load({
       return view.title.toLowerCase().includes(needle) || view.id.toLowerCase().includes(needle);
     }
 
-    /** Group roots for the matrix; a filtered-out parent keeps its children hidden. */
+    /** Group roots for the board / matrix; a filtered-out parent keeps its children hidden. */
     function groupedRoots(model, filter, query, workspaceFilter) {
       const groups = { needs: [], running: [], idle: [] };
       for (const root of model.roots) {
@@ -402,212 +407,9 @@ window.__ModuleLoader__.load({
       let total = 0;
       for (const child of view.children) {
         total += 1;
-        const childView = model.viewOf(child);
-        total += countDescendants(childView, model);
+        total += countDescendants(model.viewOf(child), model);
       }
       return total;
-    }
-    // #endregion
-
-    // #region styles
-    const CSS = `
-.mc-root{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;overflow:hidden;position:relative;outline:none;--mc-run:var(--dsw-alias-state-business-primary);--mc-warn:var(--dsw-alias-state-warn-primary);--mc-idle:var(--dsw-alias-label-tertiary);--mc-ok:var(--dsw-alias-state-success-secondary);--mc-err:var(--dsw-alias-state-error-primary)}
-.mc-root.mc-quiet{--mc-run:var(--dsw-alias-label-secondary);--mc-warn:var(--dsw-alias-label-secondary);--mc-ok:var(--dsw-alias-label-secondary)}
-.mc-head{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:14px 20px 10px;border-bottom:1px solid var(--dsw-alias-border-l2)}
-.mc-headTitle{display:flex;flex-direction:column;gap:1px;min-width:0}
-.mc-title{margin:0;font-size:16px;font-weight:600;line-height:22px}
-.mc-sub{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:16px}
-.mc-counts{display:flex;align-items:center;gap:10px;color:var(--dsw-alias-label-secondary);font-size:12px}
-.mc-count{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
-.mc-countNum{font-weight:600;color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}
-.mc-headSpacer{flex:1 1 auto;min-width:8px}
-.mc-search{display:flex;align-items:center;height:30px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);padding:0 10px;min-width:150px}
-.mc-search input{border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;outline:none;width:150px}
-.mc-search input::placeholder{color:var(--dsw-alias-label-tertiary)}
-.mc-btn{height:30px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font:inherit;cursor:pointer;padding:0 10px;white-space:nowrap}
-.mc-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.mc-btn:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:1px}
-.mc-btn[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}
-.mc-btn:disabled{opacity:.5;cursor:default}
-.mc-banner{flex:none;margin:10px 20px 0;border:.5px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-state-warn-tertiary);padding:8px 10px;display:flex;flex-direction:column;gap:6px}
-.mc-bannerHead{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--dsw-alias-label-primary);font-size:12.5px}
-.mc-bannerRows{display:flex;flex-direction:column;gap:2px}
-.mc-bannerRow{display:grid;grid-template-columns:16px minmax(0,1fr) auto auto;align-items:center;gap:8px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;padding:5px 6px;border-radius:var(--dsw-radius-md);cursor:pointer}
-.mc-bannerRow:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.mc-bannerRow:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:0}
-.mc-bannerWho{color:var(--dsw-alias-label-secondary);font-size:12px;white-space:nowrap}
-.mc-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:6px 12px 18px}
-.mc-table{display:flex;flex-direction:column;gap:2px}
-.mc-headRow,.mc-row{display:grid;grid-template-columns:20px minmax(0,1fr) 84px 132px 60px 78px 64px 28px;align-items:center;gap:10px;padding:0 8px}
-.mc-headRow{position:sticky;top:0;z-index:1;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-tertiary);font-size:11.5px;height:28px;border-bottom:1px solid var(--dsw-alias-border-l2)}
-.mc-groupHead{display:flex;align-items:center;gap:8px;margin:14px 8px 4px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:600}
-.mc-groupHead::after{content:"";flex:1 1 auto;height:1px;background:var(--dsw-alias-border-l2)}
-.mc-groupEmpty{color:var(--dsw-alias-label-tertiary);font-size:12px;padding:2px 10px 6px}
-.mc-row{min-height:40px;border-radius:var(--dsw-radius-md);border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;width:100%}
-.mc-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.mc-row[data-selected=true]{background:var(--dsw-alias-interactive-bg-hover);box-shadow:inset 2px 0 0 var(--dsw-alias-state-business-primary)}
-.mc-row:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:-1px}
-.mc-row[data-child=true]{min-height:34px}
-.mc-dot{width:8px;height:8px;border-radius:50%;justify-self:center;flex:none}
-.mc-dot[data-state=needs]{background:var(--mc-warn);border-radius:2px;transform:rotate(45deg);width:9px;height:9px}
-.mc-dot[data-state=running]{background:var(--mc-run);box-shadow:0 0 0 3px color-mix(in srgb, var(--mc-run) 22%, transparent)}
-.mc-dot[data-state=done]{background:var(--mc-ok)}
-.mc-dot[data-state=idle]{background:var(--mc-idle)}
-.mc-name{min-width:0;display:flex;flex-direction:column;gap:0}
-.mc-nameMain{display:flex;align-items:center;gap:6px;min-width:0}
-.mc-nameText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-.mc-nameText[data-quiet=true]{font-weight:400;color:var(--dsw-alias-label-secondary)}
-.mc-subText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:11.5px;line-height:16px}
-.mc-chip{flex:none;border-radius:999px;padding:0 7px;font-size:11px;line-height:17px;border:.5px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-secondary);white-space:nowrap}
-.mc-chip[data-tone=needs]{border-color:color-mix(in srgb, var(--mc-warn) 50%, transparent);color:var(--mc-warn)}
-.mc-chip[data-tone=run]{border-color:color-mix(in srgb, var(--mc-run) 50%, transparent);color:var(--mc-run)}
-.mc-chip[data-tone=ok]{border-color:color-mix(in srgb, var(--mc-ok) 50%, transparent);color:var(--mc-ok)}
-.mc-indent{flex:none;width:16px;color:var(--dsw-alias-border-l4);font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:11px;white-space:pre}
-.mc-tree{display:flex;align-items:center;gap:2px;min-width:0}
-.mc-cell{color:var(--dsw-alias-label-secondary);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
-.mc-cell[data-muted=true]{color:var(--dsw-alias-label-tertiary)}
-.mc-prog{display:flex;align-items:center;gap:6px;min-width:0}
-.mc-bar{position:relative;flex:1 1 auto;height:5px;border-radius:999px;background:var(--dsw-alias-bg-layer-3);overflow:hidden;min-width:30px}
-.mc-barFill{position:absolute;inset:0 auto 0 0;border-radius:999px;background:var(--mc-run)}
-.mc-barFill[data-done=true]{background:var(--mc-ok)}
-.mc-progText{color:var(--dsw-alias-label-tertiary);font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.mc-open{width:24px;height:24px;border-radius:var(--dsw-radius-sm);border:0;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}
-.mc-open:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.mc-foot{flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 20px;border-top:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary);font-size:11.5px}
-.mc-footSpacer{flex:1 1 auto}
-.mc-drawer{position:absolute;top:0;right:0;bottom:0;width:min(410px,86%);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);border-left:1px solid var(--dsw-alias-border-l2);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.18));z-index:5}
-.mc-drawerHead{flex:none;display:flex;align-items:flex-start;gap:8px;padding:14px 16px 10px;border-bottom:1px solid var(--dsw-alias-border-l2)}
-.mc-drawerTitle{flex:1 1 auto;min-width:0;margin:0;font-size:14px;font-weight:600;line-height:20px;overflow-wrap:anywhere}
-.mc-drawerBody{flex:1 1 auto;min-height:0;overflow-y:auto;padding:10px 16px 16px;display:flex;flex-direction:column;gap:14px}
-.mc-section{display:flex;flex-direction:column;gap:6px}
-.mc-sectionTitle{color:var(--dsw-alias-label-tertiary);font-size:11.5px;font-weight:600;letter-spacing:.02em}
-.mc-kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;font-size:12px}
-.mc-kv dt{color:var(--dsw-alias-label-tertiary);white-space:nowrap}
-.mc-kv dd{margin:0;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
-.mc-list{display:flex;flex-direction:column;gap:5px;margin:0;padding:0;list-style:none}
-.mc-item{display:flex;align-items:flex-start;gap:7px;font-size:12px;line-height:17px}
-.mc-itemDot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:5px;background:var(--dsw-alias-label-tertiary)}
-.mc-itemDot[data-status=in_progress]{background:var(--mc-run)}
-.mc-itemDot[data-status=completed]{background:var(--mc-ok)}
-.mc-itemText{min-width:0;overflow-wrap:anywhere}
-.mc-itemText[data-status=completed]{color:var(--dsw-alias-label-tertiary);text-decoration:line-through}
-.mc-itemMeta{margin-left:auto;color:var(--dsw-alias-label-tertiary);font-size:11px;white-space:nowrap}
-.mc-zone{border:.5px dashed var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-md);padding:8px 10px;color:var(--dsw-alias-label-tertiary);font-size:12px;display:flex;flex-direction:column;gap:3px}
-.mc-zoneTitle{color:var(--dsw-alias-label-secondary);font-size:11.5px;font-weight:600}
-.mc-drawerFoot{flex:none;display:flex;gap:8px;padding:10px 16px 14px;border-top:1px solid var(--dsw-alias-border-l2)}
-.mc-primary{background:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-primary-foreground)}
-.mc-primary:hover{opacity:.92;background:var(--dsw-alias-state-business-primary)}
-.mc-center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:13px}
-.mc-empty{color:var(--dsw-alias-label-tertiary);font-size:12.5px;padding:18px 10px}
-.mc-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-@media (max-width:900px){.mc-headRow,.mc-row{grid-template-columns:20px minmax(0,1fr) 64px 96px 54px 28px}.mc-colCtx,.mc-colOut{display:none}}
-`;
-
-    const ICON_PATH = 'M4 4.6A.6.6 0 0 1 4.6 4h6.8a.6.6 0 0 1 .6.6v6.8a.6.6 0 0 1-.6.6H4.6a.6.6 0 0 1-.6-.6zM13.4 4h6a.6.6 0 0 1 .6.6v3.8a.6.6 0 0 1-.6.6h-6a.6.6 0 0 1-.6-.6V4.6a.6.6 0 0 1 .6-.6zM13.4 10.6h6a.6.6 0 0 1 .6.6v8.2a.6.6 0 0 1-.6.6h-6a.6.6 0 0 1-.6-.6v-8.2a.6.6 0 0 1 .6-.6zM4 14h6.8a.6.6 0 0 1 .6.6v4.8a.6.6 0 0 1-.6.6H4.6a.6.6 0 0 1-.6-.6v-4.8A.6.6 0 0 1 4 14z';
-
-    function MissionIcon(props) {
-      const size = isNum(props && props.size) ? props.size : 18;
-      return h(
-        'svg',
-        {
-          width: size,
-          height: size,
-          viewBox: '0 0 24 24',
-          fill: 'none',
-          'aria-hidden': true,
-          style: { display: 'block' },
-        },
-        h('path', {
-          d: ICON_PATH,
-          fill: 'currentColor',
-          opacity: props && props.active ? 1 : 0.72,
-        }),
-      );
-    }
-    // #endregion
-
-    // #region components
-    class PanelBoundary extends React.Component {
-      constructor(props) {
-        super(props);
-        this.state = { failed: false };
-      }
-      static getDerivedStateFromError() {
-        return { failed: true };
-      }
-      render() {
-        if (this.state.failed) {
-          return h(
-            'div',
-            { className: 'mc-root' },
-            h('div', { className: 'mc-center' }, this.props.label),
-          );
-        }
-        return this.props.children;
-      }
-    }
-
-    function Dot(props) {
-      return h('span', { className: 'mc-dot', 'data-state': props.state, 'aria-hidden': true });
-    }
-
-    function Progress(props) {
-      const progress = props.progress;
-      if (!progress) return h('span', { className: 'mc-cell', 'data-muted': true }, '—');
-      const ratio = progress.total > 0 ? progress.done / progress.total : 0;
-      return h(
-        'span',
-        { className: 'mc-prog' },
-        h(
-          'span',
-          { className: 'mc-bar', role: 'progressbar', 'aria-valuenow': progress.done, 'aria-valuemax': progress.total },
-          h('span', {
-            className: 'mc-barFill',
-            'data-done': progress.done === progress.total,
-            style: { width: `${Math.round(ratio * 100)}%` },
-          }),
-        ),
-        h('span', { className: 'mc-progText' }, `${progress.done}/${progress.total}`),
-      );
-    }
-
-    function Chain(props) {
-      const { view, model, t } = props;
-      const kids = view.children.length;
-      if (kids === 0) return h('span', { className: 'mc-cell', 'data-muted': view.isChild }, t(view.isChild ? 'chainChild' : 'chainMain'));
-      let live = 0;
-      for (const childView of view.children.map((child) => model.viewOf(child))) if (childView.running) live += 1;
-      const label = `${t('chainMain')}+${kids}${t('chainChild')}`;
-      return h(
-        'span',
-        { className: 'mc-cell', style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
-        h('span', null, label),
-        live > 0 ? h('span', { className: 'mc-chip', 'data-tone': 'run' }, `${live}${t('chainRunning')}`) : null,
-      );
-    }
-
-    function ContextMeter(props) {
-      const context = props.context;
-      if (!context || !isNum(context.pct)) {
-        return h('span', { className: 'mc-cell', 'data-muted': true }, '—');
-      }
-      const tone = context.pct >= 85 ? 'var(--mc-err)' : context.pct >= 65 ? 'var(--mc-warn)' : 'var(--dsw-alias-label-secondary)';
-      return h('span', { className: 'mc-cell', style: { color: tone } }, `${context.pct}%`);
-    }
-
-    function ActivityCell(props) {
-      const { view, now, t } = props;
-      const timing = view.timing;
-      if (timing && timing.ms > 0) {
-        const label = relLabel(timing.ms, t);
-        return h('span', { className: 'mc-cell', 'data-muted': !timing.live }, label);
-      }
-      const updated = view.row && isNum(view.row.updatedAt) ? view.row.updatedAt : 0;
-      if (updated > 0) {
-        const label = relLabel(Math.max(0, now - updated), t);
-        return h('span', { className: 'mc-cell', 'data-muted': true }, label);
-      }
-      return h('span', { className: 'mc-cell', 'data-muted': true }, '—');
     }
 
     function stateOf(view) {
@@ -617,13 +419,391 @@ window.__ModuleLoader__.load({
       return 'idle';
     }
 
-    function Row(props) {
-      const { view, model, t, selected, onSelect, onOpen, expanded, onToggle, level } = props;
+    function liveChildren(view, model) {
+      let live = 0;
+      for (const child of view.children) if (model.viewOf(child).running) live += 1;
+      return live;
+    }
+    // #endregion
+
+    // #region styles
+    const MONO = 'var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace)';
+    const CSS = `
+.mc-root{height:100%;min-height:0;display:flex;flex-direction:column;background-color:var(--dsw-alias-bg-base);background-image:radial-gradient(circle at 1px 1px,color-mix(in srgb,var(--dsw-alias-border-l2) 55%,transparent) 1px,transparent 0);background-size:22px 22px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;overflow:hidden;position:relative;outline:none;--mc-run:var(--dsw-alias-state-business-primary);--mc-warn:var(--dsw-alias-state-warn-primary);--mc-idle:var(--dsw-alias-label-tertiary);--mc-ok:var(--dsw-alias-state-success-secondary);--mc-err:var(--dsw-alias-state-error-primary);--mc-line:color-mix(in srgb,var(--dsw-alias-border-l3) 80%,transparent);--mc-panel:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 88%,transparent)}
+.mc-root.mc-quiet{--mc-run:var(--dsw-alias-label-secondary);--mc-warn:var(--dsw-alias-label-secondary);--mc-ok:var(--dsw-alias-label-secondary)}
+.mc-head{flex:none;display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 16px;padding:12px 20px 10px;border-bottom:1px solid var(--mc-line);position:relative}
+html[data-platform=darwin] .mc-head{padding-top:calc(10px + var(--dsh-frame-top-clearance,0px));padding-left:max(20px,var(--dsh-frame-leading-clearance,0px))}
+.mc-head::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--mc-run) 55%,transparent),transparent);opacity:.8}
+.mc-brand{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mc-title{margin:0;font-family:${MONO};font-size:15px;font-weight:600;line-height:20px;letter-spacing:.22em;text-transform:uppercase;white-space:nowrap}
+.mc-titleMark{color:var(--mc-run);margin-right:8px}
+.mc-telemetry{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.mc-stat{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border:1px solid var(--mc-line);border-radius:4px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 70%,transparent);font-family:${MONO};font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
+.mc-statNum{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;font-size:12px}
+.mc-stat[data-tone=run]{border-color:color-mix(in srgb,var(--mc-run) 35%,transparent)}
+.mc-stat[data-tone=needs]{border-color:color-mix(in srgb,var(--mc-warn) 40%,transparent);color:var(--mc-warn)}
+.mc-headSpacer{flex:1 1 auto;min-width:8px}
+.mc-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mc-seg{display:inline-flex;border:1px solid var(--mc-line);border-radius:5px;overflow:hidden;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 70%,transparent)}
+.mc-segBtn{height:28px;padding:0 10px;border:0;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.mc-segBtn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+.mc-segBtn[aria-pressed=true]{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--mc-run) 16%,transparent);box-shadow:inset 0 -1.5px 0 var(--mc-run)}
+.mc-segBtn:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:-2px}
+.mc-search{display:flex;align-items:center;height:28px;border:1px solid var(--mc-line);border-radius:5px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 70%,transparent);padding:0 9px;min-width:140px}
+.mc-search input{border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;outline:none;width:140px;font-family:${MONO}}
+.mc-search input::placeholder{color:var(--dsw-alias-label-tertiary);letter-spacing:.04em}
+.mc-btn{height:28px;border:1px solid var(--mc-line);border-radius:5px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 70%,transparent);color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;padding:0 9px;white-space:nowrap;font-family:${MONO};letter-spacing:.04em}
+.mc-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.mc-btn:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:1px}
+.mc-btn[aria-pressed=true]{border-color:color-mix(in srgb,var(--mc-run) 55%,transparent);color:var(--mc-run)}
+.mc-btn:disabled{opacity:.5;cursor:default}
+.mc-select{height:28px;border:1px solid var(--mc-line);border-radius:5px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 70%,transparent);color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;padding:0 6px;font-family:${MONO}}
+.mc-banner{flex:none;margin:10px 20px 0;border:1px solid color-mix(in srgb,var(--mc-warn) 38%,transparent);border-radius:6px;background:linear-gradient(180deg,color-mix(in srgb,var(--mc-warn) 10%,transparent),transparent);padding:8px 10px;display:flex;flex-direction:column;gap:6px;position:relative;overflow:hidden}
+.mc-banner::before{content:"";position:absolute;inset:0 auto 0 0;width:2px;background:var(--mc-warn)}
+.mc-bannerHead{display:flex;align-items:center;gap:8px;font-family:${MONO};font-weight:600;color:var(--mc-warn);font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+.mc-bannerRows{display:flex;flex-direction:column;gap:1px}
+.mc-bannerRow{display:grid;grid-template-columns:16px minmax(0,1fr) auto auto;align-items:center;gap:8px;border:0;background:transparent;color:inherit;font:inherit;font-size:12px;text-align:left;padding:5px 6px;border-radius:4px;cursor:pointer}
+.mc-bannerRow:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.mc-bannerRow:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color)}
+.mc-bannerWho{color:var(--dsw-alias-label-tertiary);font-size:11.5px;white-space:nowrap;font-family:${MONO}}
+.mc-body{flex:1 1 auto;min-height:0;overflow:hidden;display:flex;flex-direction:column;padding:10px 14px 6px}
+.mc-board{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(238px,1fr));gap:12px;overflow-x:auto;overflow-y:hidden;padding-bottom:2px}
+.mc-col{min-width:0;display:flex;flex-direction:column;min-height:0;border:1px solid var(--mc-line);border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 55%,transparent);position:relative}
+.mc-col::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;border-radius:8px 8px 0 0;background:var(--mc-col-accent,var(--dsw-alias-border-l3));opacity:.85}
+.mc-col[data-state=needs]{--mc-col-accent:var(--mc-warn)}
+.mc-col[data-state=running]{--mc-col-accent:var(--mc-run)}
+.mc-col[data-state=idle]{--mc-col-accent:var(--mc-idle)}
+.mc-colHead{flex:none;display:flex;align-items:center;gap:8px;padding:12px 12px 8px;border-bottom:1px solid color-mix(in srgb,var(--mc-line) 70%,transparent)}
+.mc-colName{font-family:${MONO};font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-secondary);font-weight:600}
+.mc-colCount{margin-left:auto;font-family:${MONO};font-size:11px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.mc-colBody{flex:1 1 auto;min-height:0;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px}
+.mc-colEmpty{color:var(--dsw-alias-label-tertiary);font-size:12px;padding:10px 6px;border:1px dashed var(--mc-line);border-radius:6px;text-align:center}
+.mc-card{position:relative;display:flex;flex-direction:column;gap:7px;padding:10px 11px 9px;border:1px solid var(--mc-line);border-radius:7px;background:var(--mc-panel);cursor:pointer;text-align:left;color:inherit;font:inherit;transition:border-color .12s ease,box-shadow .12s ease,transform .12s ease}
+.mc-card:hover{border-color:color-mix(in srgb,var(--mc-card-accent,var(--mc-run)) 45%,var(--mc-line));transform:translateY(-1px);box-shadow:0 6px 18px -12px rgba(0,0,0,.55)}
+.mc-card:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:1px}
+.mc-card[data-selected=true]{border-color:color-mix(in srgb,var(--mc-run) 70%,var(--mc-line));box-shadow:0 0 0 1px color-mix(in srgb,var(--mc-run) 55%,transparent)}
+.mc-card[data-state=needs]{--mc-card-accent:var(--mc-warn)}
+.mc-card[data-state=running]{--mc-card-accent:var(--mc-run)}
+.mc-card[data-state=done]{--mc-card-accent:var(--mc-ok)}
+.mc-card[data-state=idle]{--mc-card-accent:var(--mc-idle)}
+.mc-card::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:2px;border-radius:2px;background:var(--mc-card-accent,var(--mc-idle));opacity:.9}
+.mc-cardTop{display:flex;align-items:flex-start;gap:7px;min-width:0}
+.mc-cardTitle{flex:1 1 auto;min-width:0;font-size:13px;font-weight:600;line-height:18px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mc-cardSub{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:${MONO};letter-spacing:.02em}
+.mc-cardMetrics{display:flex;gap:10px;flex-wrap:wrap;font-family:${MONO};font-size:10.5px;letter-spacing:.06em;color:var(--dsw-alias-label-tertiary)}
+.mc-metric{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.mc-metricValue{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;letter-spacing:0}
+.mc-metricValue[data-tone=warn]{color:var(--mc-warn)}
+.mc-metricValue[data-tone=err]{color:var(--mc-err)}
+.mc-metricValue[data-tone=run]{color:var(--mc-run)}
+.mc-prog{display:flex;align-items:center;gap:7px;min-width:0}
+.mc-bar{position:relative;flex:1 1 auto;height:4px;border-radius:999px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-3) 90%,transparent);overflow:hidden;min-width:26px}
+.mc-barFill{position:absolute;inset:0 auto 0 0;border-radius:999px;background:var(--mc-run);transition:width .2s ease}
+.mc-barFill[data-done=true]{background:var(--mc-ok)}
+.mc-progText{color:var(--dsw-alias-label-tertiary);font-size:10.5px;font-family:${MONO};font-variant-numeric:tabular-nums;white-space:nowrap}
+.mc-kids{display:flex;flex-direction:column;gap:2px;padding-left:2px;border-left:1px solid color-mix(in srgb,var(--mc-line) 90%,transparent);margin-left:3px}
+.mc-kid{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 8px;border-radius:4px;font-size:11.5px;color:var(--dsw-alias-label-secondary);min-width:0}
+.mc-kid:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.mc-kidName{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mc-kidMeta{flex:none;color:var(--dsw-alias-label-tertiary);font-size:10.5px;font-family:${MONO};white-space:nowrap}
+.mc-cardFoot{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-tertiary);font-size:10.5px;font-family:${MONO};letter-spacing:.05em}
+.mc-cardFootSpacer{flex:1 1 auto}
+.mc-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--mc-idle);margin-top:5px}
+.mc-dot[data-state=needs]{border-radius:1px;transform:rotate(45deg);background:var(--mc-warn);width:8px;height:8px}
+.mc-dot[data-state=running]{background:var(--mc-run);box-shadow:0 0 0 3px color-mix(in srgb,var(--mc-run) 20%,transparent);animation:mc-pulse 1.8s ease-in-out infinite}
+.mc-dot[data-state=done]{background:var(--mc-ok)}
+.mc-dot[data-state=idle]{background:var(--mc-idle)}
+@keyframes mc-pulse{0%,100%{box-shadow:0 0 0 3px color-mix(in srgb,var(--mc-run) 18%,transparent)}50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--mc-run) 8%,transparent)}}
+@media (prefers-reduced-motion:reduce){.mc-card{transition:none}.mc-card:hover{transform:none}.mc-dot[data-state=running]{animation:none}}
+.mc-chip{flex:none;border-radius:4px;padding:0 6px;font-size:10.5px;line-height:16px;border:1px solid var(--mc-line);color:var(--dsw-alias-label-tertiary);white-space:nowrap;font-family:${MONO};letter-spacing:.04em;background:transparent}
+.mc-chip[data-tone=needs]{border-color:color-mix(in srgb,var(--mc-warn) 50%,transparent);color:var(--mc-warn)}
+.mc-chip[data-tone=run]{border-color:color-mix(in srgb,var(--mc-run) 48%,transparent);color:var(--mc-run)}
+.mc-chip[data-tone=ok]{border-color:color-mix(in srgb,var(--mc-ok) 48%,transparent);color:var(--mc-ok)}
+button.mc-chip{cursor:pointer}
+button.mc-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.mc-open{width:22px;height:22px;border-radius:4px;border:0;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;flex:none}
+.mc-open:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.mc-matrix{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--mc-line);border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 45%,transparent)}
+.mc-matrixScroll{flex:1 1 auto;min-height:0;overflow-y:auto;padding:4px 8px 10px}
+.mc-headRow,.mc-row{display:grid;grid-template-columns:20px minmax(0,1fr) 92px 138px 62px 82px 62px 26px;align-items:center;gap:10px;padding:0 8px}
+.mc-headRow{position:sticky;top:0;z-index:1;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-tertiary);font-family:${MONO};font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;height:30px;border-bottom:1px solid var(--mc-line)}
+.mc-groupHead{display:flex;align-items:center;gap:8px;margin:12px 8px 3px;color:var(--dsw-alias-label-secondary);font-family:${MONO};font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600}
+.mc-groupHead::after{content:"";flex:1 1 auto;height:1px;background:var(--mc-line)}
+.mc-groupEmpty{color:var(--dsw-alias-label-tertiary);font-size:11.5px;padding:2px 10px 6px;font-family:${MONO}}
+.mc-row{min-height:38px;border-radius:5px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;width:100%}
+.mc-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.mc-row[data-selected=true]{background:var(--dsw-alias-interactive-bg-hover);box-shadow:inset 2px 0 0 var(--mc-run)}
+.mc-row:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:-1px}
+.mc-row[data-child=true]{min-height:32px}
+.mc-name{min-width:0;display:flex;flex-direction:column;gap:0}
+.mc-nameMain{display:flex;align-items:center;gap:6px;min-width:0}
+.mc-nameText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.mc-nameText[data-quiet=true]{font-weight:400;color:var(--dsw-alias-label-secondary)}
+.mc-subText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:15px;font-family:${MONO}}
+.mc-indent{flex:none;width:14px;color:var(--dsw-alias-border-l4);font-family:${MONO};font-size:10px;white-space:pre}
+.mc-cell{color:var(--dsw-alias-label-secondary);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-family:${MONO}}
+.mc-cell[data-muted=true]{color:var(--dsw-alias-label-tertiary)}
+.mc-foot{flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 20px;border-top:1px solid var(--mc-line);color:var(--dsw-alias-label-tertiary);font-family:${MONO};font-size:10.5px;letter-spacing:.04em}
+.mc-footSpacer{flex:1 1 auto}
+.mc-drawer{position:absolute;top:0;right:0;bottom:0;width:min(420px,88%);display:flex;flex-direction:column;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 96%,transparent);border-left:1px solid color-mix(in srgb,var(--mc-run) 22%,var(--mc-line));box-shadow:-18px 0 40px -28px rgba(0,0,0,.7);z-index:5}
+.mc-drawerHead{flex:none;display:flex;align-items:flex-start;gap:8px;padding:13px 16px 10px;border-bottom:1px solid var(--mc-line);position:relative}
+.mc-drawerHead::after{content:"";position:absolute;left:16px;right:16px;bottom:-1px;height:1px;background:linear-gradient(90deg,color-mix(in srgb,var(--mc-run) 60%,transparent),transparent)}
+html[data-platform=darwin] .mc-drawerHead{padding-top:calc(13px + var(--dsh-frame-top-clearance,0px))}
+.mc-drawerTitle{flex:1 1 auto;min-width:0;margin:0;font-size:14px;font-weight:600;line-height:20px;overflow-wrap:anywhere}
+.mc-drawerBody{flex:1 1 auto;min-height:0;overflow-y:auto;padding:12px 16px 16px;display:flex;flex-direction:column;gap:14px}
+.mc-section{display:flex;flex-direction:column;gap:6px}
+.mc-sectionTitle{color:var(--dsw-alias-label-tertiary);font-family:${MONO};font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
+.mc-kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 12px;font-size:12px;margin:0}
+.mc-kv dt{color:var(--dsw-alias-label-tertiary);white-space:nowrap}
+.mc-kv dd{margin:0;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.mc-list{display:flex;flex-direction:column;gap:5px;margin:0;padding:0;list-style:none}
+.mc-item{display:flex;align-items:flex-start;gap:7px;font-size:12px;line-height:17px}
+.mc-itemDot{flex:none;width:6px;height:6px;border-radius:50%;margin-top:6px;background:var(--dsw-alias-label-tertiary)}
+.mc-itemDot[data-status=in_progress]{background:var(--mc-run)}
+.mc-itemDot[data-status=completed]{background:var(--mc-ok)}
+.mc-itemText{min-width:0;overflow-wrap:anywhere}
+.mc-itemText[data-status=completed]{color:var(--dsw-alias-label-tertiary);text-decoration:line-through}
+.mc-itemMeta{margin-left:auto;color:var(--dsw-alias-label-tertiary);font-size:10.5px;white-space:nowrap;font-family:${MONO}}
+.mc-zone{border:1px dashed var(--mc-line);border-radius:6px;padding:8px 10px;color:var(--dsw-alias-label-tertiary);font-size:11.5px;display:flex;flex-direction:column;gap:3px;font-family:${MONO};letter-spacing:.02em}
+.mc-zoneTitle{color:var(--dsw-alias-label-secondary);font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.mc-drawerFoot{flex:none;display:flex;gap:8px;padding:10px 16px 14px;border-top:1px solid var(--mc-line)}
+.mc-primary{background:color-mix(in srgb,var(--mc-run) 88%,transparent);border-color:transparent;color:var(--dsw-alias-label-primary-foreground)}
+.mc-primary:hover{background:var(--mc-run);color:var(--dsw-alias-label-primary-foreground)}
+.mc-center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:13px}
+.mc-empty{color:var(--dsw-alias-label-tertiary);font-size:12.5px;padding:18px 10px;font-family:${MONO}}
+@media (max-width:980px){.mc-board{grid-template-columns:repeat(3,minmax(210px,1fr))}.mc-headRow,.mc-row{grid-template-columns:20px minmax(0,1fr) 78px 110px 52px 26px}.mc-colCtx,.mc-colOut{display:none}}
+@media (max-width:720px){.mc-board{grid-template-columns:1fr;overflow-y:auto}}
+`;
+
+    const ICON_PATH =
+      'M4 4.6A.6.6 0 0 1 4.6 4h6.8a.6.6 0 0 1 .6.6v6.8a.6.6 0 0 1-.6.6H4.6a.6.6 0 0 1-.6-.6zM13.4 4h6a.6.6 0 0 1 .6.6v3.8a.6.6 0 0 1-.6.6h-6a.6.6 0 0 1-.6-.6V4.6a.6.6 0 0 1 .6-.6zM13.4 10.6h6a.6.6 0 0 1 .6.6v8.2a.6.6 0 0 1-.6.6h-6a.6.6 0 0 1-.6-.6v-8.2a.6.6 0 0 1 .6-.6zM4 14h6.8a.6.6 0 0 1 .6.6v4.8a.6.6 0 0 1-.6.6H4.6a.6.6 0 0 1-.6-.6v-4.8A.6.6 0 0 1 4 14z';
+
+    function MissionIcon(props) {
+      const size = isNum(props && props.size) ? props.size : 18;
+      return h(
+        'svg',
+        { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true, style: { display: 'block' } },
+        h('path', { d: ICON_PATH, fill: 'currentColor', opacity: props && props.active ? 1 : 0.72 }),
+      );
+    }
+    // #endregion
+
+    // #region shared bits
+    class PanelBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { failed: false };
+      }
+      static getDerivedStateFromError() {
+        return { failed: true };
+      }
+      render() {
+        if (this.state.failed) return h('div', { className: 'mc-root' }, h('div', { className: 'mc-center' }, this.props.label));
+        return this.props.children;
+      }
+    }
+
+    function Dot(props) {
+      return h('span', { className: 'mc-dot', 'data-state': props.state, 'aria-hidden': true });
+    }
+
+    function ContextValue(props) {
+      const context = props.context;
+      if (!context || !isNum(context.pct)) return h('span', { className: 'mc-metricValue' }, '—');
+      const tone = context.pct >= 85 ? 'err' : context.pct >= 65 ? 'warn' : undefined;
+      return h('span', { className: 'mc-metricValue', 'data-tone': tone }, `${context.pct}%`);
+    }
+
+    function RelativeTime(props) {
+      const { view, now, t } = props;
+      const timing = view.timing;
+      if (timing && timing.ms > 0) return h('span', null, relLabel(timing.ms, t));
+      const updated = view.row && isNum(view.row.updatedAt) ? view.row.updatedAt : 0;
+      if (updated > 0) return h('span', null, relLabel(Math.max(0, now - updated), t));
+      return h('span', null, '—');
+    }
+    // #endregion
+
+    // #region board view
+    function BoardCard(props) {
+      const { view, model, t, now, selected, onSelect, onOpen, expanded, onToggle } = props;
       const state = stateOf(view);
+      const kids = orderedChildren(view);
+      const kidsOpen = expanded[view.id] !== false;
+      const totalKids = view.children.length;
+      const moreKids = countDescendants(view, model) - totalKids;
+      const live = liveChildren(view, model);
+      const chainLabel = totalKids === 0 ? t('chainMain') : `${t('chainMain')}+${totalKids}${t('chainChild')}`;
+      return h(
+        'div',
+        {
+          className: 'mc-card',
+          'data-state': state,
+          'data-selected': selected,
+          role: 'button',
+          tabIndex: -1,
+          'aria-current': selected ? 'true' : undefined,
+          onClick: () => onSelect(view.id),
+          onDoubleClick: () => onOpen(view.id),
+        },
+        h(
+          'div',
+          { className: 'mc-cardTop' },
+          h(Dot, { state }),
+          h('span', { className: 'mc-cardTitle', title: view.title }, view.title),
+          view.pending ? h('span', { className: 'mc-chip', 'data-tone': 'needs' }, t(`kind.${view.pending.kind}`)) : null,
+          view.unread && !view.pending ? h('span', { className: 'mc-chip', 'data-tone': 'ok' }, '·') : null,
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'mc-open',
+              title: t('action.open'),
+              'aria-label': t('action.open'),
+              onClick: (event) => {
+                event.stopPropagation();
+                onOpen(view.id);
+              },
+            },
+            h(
+              'svg',
+              { width: 13, height: 13, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
+              h('path', {
+                d: 'M6 3.5h6.5V10M12.5 3.5 4 12',
+                stroke: 'currentColor',
+                'stroke-width': 1.4,
+                'stroke-linecap': 'round',
+                'stroke-linejoin': 'round',
+              }),
+            ),
+          ),
+        ),
+        view.workspace ? h('div', { className: 'mc-cardSub', title: view.workspace }, view.workspace) : null,
+        h(
+          'div',
+          { className: 'mc-cardMetrics' },
+          h('span', { className: 'mc-metric' }, t('metric.agents'), h('span', { className: 'mc-metricValue', 'data-tone': live > 0 ? 'run' : undefined }, chainLabel)),
+          live > 0 ? h('span', { className: 'mc-chip', 'data-tone': 'run' }, `${live}${t('chainRunning')}`) : null,
+          h('span', { className: 'mc-metric' }, t('metric.context'), h(ContextValue, { context: view.context })),
+        ),
+        h(
+          'div',
+          { className: 'mc-prog' },
+          view.todos
+            ? h(
+                'div',
+                { className: 'mc-bar', role: 'progressbar', 'aria-valuenow': view.todos.done, 'aria-valuemax': view.todos.total },
+                h('div', {
+                  className: 'mc-barFill',
+                  'data-done': view.todos.done === view.todos.total,
+                  style: { width: `${view.todos.total > 0 ? Math.round((view.todos.done / view.todos.total) * 100) : 0}%` },
+                }),
+              )
+            : h('div', { className: 'mc-bar' }),
+          h('span', { className: 'mc-progText' }, view.todos ? `${view.todos.done}/${view.todos.total}` : '—'),
+        ),
+        totalKids > 0
+          ? h(
+              React.Fragment,
+              null,
+              h(
+                'div',
+                { className: 'mc-cardFoot' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'mc-chip',
+                    'aria-expanded': kidsOpen,
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      onToggle(view.id);
+                    },
+                  },
+                  kidsOpen ? `−${totalKids}` : `+${totalKids}`,
+                ),
+                moreKids > 0 ? h('span', { className: 'mc-chip', title: t('moreChildren').replace('{n}', String(moreKids)) }, `+${moreKids}`) : null,
+              ),
+              kidsOpen
+                ? h(
+                    'div',
+                    { className: 'mc-kids' },
+                    kids.map((child) => {
+                      const childView = model.viewOf(child);
+                      return h(
+                        'div',
+                        { className: 'mc-kid', key: child.id },
+                        h(Dot, { state: stateOf(childView) }),
+                        h('span', { className: 'mc-kidName', title: childView.title }, childView.title),
+                        childView.pending ? h('span', { className: 'mc-kidMeta' }, t(`kind.${childView.pending.kind}`)) : null,
+                        h('span', { className: 'mc-kidMeta' }, h(RelativeTime, { view: childView, now, t })),
+                      );
+                    }),
+                  )
+                : null,
+            )
+          : null,
+        h(
+          'div',
+          { className: 'mc-cardFoot' },
+          h('span', null, h(RelativeTime, { view, now, t })),
+          h('span', { className: 'mc-cardFootSpacer' }),
+          h('span', { title: t('outputHint') }, `${t('metric.output')} ${t('outputPlaceholder')}`),
+        ),
+      );
+    }
+
+    function Board(props) {
+      const { groups, model, t, now, selectedId, onSelect, onOpen, expanded, onToggle } = props;
+      return h(
+        'div',
+        { className: 'mc-board', role: 'list' },
+        ['needs', 'running', 'idle'].map((state) =>
+          h(
+            'section',
+            { className: 'mc-col', key: state, 'data-state': state, 'aria-label': t(`group.${state}`) },
+            h(
+              'header',
+              { className: 'mc-colHead' },
+              h('span', { className: 'mc-colName' }, t(`group.${state}`)),
+              h('span', { className: 'mc-colCount' }, String(groups[state].length).padStart(2, '0')),
+            ),
+            h(
+              'div',
+              { className: 'mc-colBody' },
+              groups[state].length === 0
+                ? h('div', { className: 'mc-colEmpty' }, t(`groupEmpty.${state}`))
+                : groups[state].map((view) =>
+                    h(BoardCard, {
+                      key: view.id,
+                      view,
+                      model,
+                      t,
+                      now,
+                      selected: selectedId === view.id,
+                      onSelect,
+                      onOpen,
+                      expanded,
+                      onToggle,
+                    }),
+                  ),
+            ),
+          ),
+        ),
+      );
+    }
+    // #endregion
+
+    // #region matrix view
+    function MatrixRow(props) {
+      const { view, model, t, now, selected, selectedId, onSelect, onOpen, expanded, onToggle, level } = props;
+      const state = stateOf(view);
+      const kids = orderedChildren(view);
+      const kidsOpen = expanded[view.id] !== false;
       const totalKids = view.children.length;
       const moreKids = level === 0 ? countDescendants(view, model) - totalKids : 0;
-      const kidsOpen = expanded[view.id] !== false;
-      const subtitle = view.workspace || '';
+      const live = liveChildren(view, model);
+      const chainLabel = totalKids === 0 ? t('chainMain') : `${t('chainMain')}+${totalKids}${t('chainChild')}`;
       return h(
         React.Fragment,
         null,
@@ -635,10 +815,9 @@ window.__ModuleLoader__.load({
             'data-child': level > 0,
             role: 'button',
             tabIndex: -1,
-            'aria-current': selected ? 'true' : undefined,
             onClick: () => onSelect(view.id),
             onDoubleClick: () => onOpen(view.id),
-            style: level > 0 ? { paddingLeft: 8 + level * 22 } : undefined,
+            style: level > 0 ? { paddingLeft: 8 + level * 24 } : undefined,
           },
           h(Dot, { state }),
           h(
@@ -648,59 +827,58 @@ window.__ModuleLoader__.load({
               'span',
               { className: 'mc-nameMain' },
               level > 0 ? h('span', { className: 'mc-indent' }, '└') : null,
-              h(
-                'span',
-                { className: 'mc-nameText', 'data-quiet': level > 0, title: view.title },
-                view.title,
-              ),
+              h('span', { className: 'mc-nameText', 'data-quiet': level > 0, title: view.title }, view.title),
               view.pending ? h('span', { className: 'mc-chip', 'data-tone': 'needs' }, t(`kind.${view.pending.kind}`)) : null,
-              view.unread && !view.pending ? h('span', { className: 'mc-chip', 'data-tone': 'ok' }, t('drawer.unread')) : null,
-              totalKids > 0 && kidsOpen
+              view.unread && !view.pending ? h('span', { className: 'mc-chip', 'data-tone': 'ok' }, '·') : null,
+              totalKids > 0
                 ? h(
                     'button',
                     {
                       type: 'button',
                       className: 'mc-chip',
-                      'aria-expanded': true,
+                      'aria-expanded': kidsOpen,
                       onClick: (event) => {
                         event.stopPropagation();
                         onToggle(view.id);
                       },
-                      style: { cursor: 'pointer', background: 'transparent' },
                     },
-                    `−${totalKids}`,
-                  )
-                : null,
-              totalKids > 0 && !kidsOpen
-                ? h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'mc-chip',
-                      'aria-expanded': false,
-                      onClick: (event) => {
-                        event.stopPropagation();
-                        onToggle(view.id);
-                      },
-                      style: { cursor: 'pointer', background: 'transparent' },
-                    },
-                    `+${totalKids}`,
+                    kidsOpen ? `−${totalKids}` : `+${totalKids}`,
                   )
                 : null,
               moreKids > 0 ? h('span', { className: 'mc-chip', title: t('moreChildren').replace('{n}', String(moreKids)) }, `+${moreKids}`) : null,
             ),
-            subtitle ? h('span', { className: 'mc-subText' }, subtitle) : null,
+            view.workspace ? h('span', { className: 'mc-subText' }, view.workspace) : null,
           ),
-          h(Chain, { view, model, t }),
-          h(Progress, { progress: view.todos }),
-          h(ContextMeter, { context: view.context }),
-          h(ActivityCell, { view, now: props.now, t }),
-          h('span', { className: 'mc-cell mc-colOut', 'data-muted': true, title: t('outputHint') }, t('outputPlaceholder')),
+          h(
+            'span',
+            { className: 'mc-cell', style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+            h('span', null, chainLabel),
+            live > 0 ? h('span', { className: 'mc-chip', 'data-tone': 'run' }, `${live}${t('chainRunning')}`) : null,
+          ),
+          view.todos
+            ? h(
+                'span',
+                { className: 'mc-prog' },
+                h(
+                  'span',
+                  { className: 'mc-bar', role: 'progressbar', 'aria-valuenow': view.todos.done, 'aria-valuemax': view.todos.total },
+                  h('span', {
+                    className: 'mc-barFill',
+                    'data-done': view.todos.done === view.todos.total,
+                    style: { width: `${view.todos.total > 0 ? Math.round((view.todos.done / view.todos.total) * 100) : 0}%` },
+                  }),
+                ),
+                h('span', { className: 'mc-progText' }, `${view.todos.done}/${view.todos.total}`),
+              )
+            : h('span', { className: 'mc-cell', 'data-muted': true }, '—'),
+          h('span', { className: 'mc-cell mc-colCtx' }, h(ContextValue, { context: view.context })),
+          h('span', { className: 'mc-cell' }, h(RelativeTime, { view, now, t })),
+          h('span', { className: 'mc-cell mc-colOut', title: t('outputHint') }, t('outputPlaceholder')),
           h(
             'button',
             {
               type: 'button',
-              className: 'mc-open mc-colOpen',
+              className: 'mc-open',
               title: t('action.open'),
               'aria-label': t('action.open'),
               onClick: (event) => {
@@ -710,7 +888,7 @@ window.__ModuleLoader__.load({
             },
             h(
               'svg',
-              { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
+              { width: 13, height: 13, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
               h('path', {
                 d: 'M6 3.5h6.5V10M12.5 3.5 4 12',
                 stroke: 'currentColor',
@@ -722,15 +900,15 @@ window.__ModuleLoader__.load({
           ),
         ),
         totalKids > 0 && kidsOpen
-          ? orderedChildren(view).map((child) =>
-              h(Row, {
+          ? kids.map((child) =>
+              h(MatrixRow, {
                 key: child.id,
                 view: model.viewOf(child),
                 model,
                 t,
-                selected: props.selectedId === child.id,
-                selectedId: props.selectedId,
-                now: props.now,
+                now,
+                selected: selectedId === child.id,
+                selectedId,
                 onSelect,
                 onOpen,
                 expanded,
@@ -742,6 +920,57 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function Matrix(props) {
+      const { groups, model, t, now, selectedId, onSelect, onOpen, expanded, onToggle } = props;
+      return h(
+        'div',
+        { className: 'mc-matrix', role: 'list' },
+        h(
+          'div',
+          { className: 'mc-headRow' },
+          h('span', null, ''),
+          h('span', null, t('column.task')),
+          h('span', null, t('column.chain')),
+          h('span', null, t('column.progress')),
+          h('span', { className: 'mc-colCtx' }, t('column.context')),
+          h('span', null, t('column.activity')),
+          h('span', { className: 'mc-colOut' }, t('column.output')),
+          h('span', null, ''),
+        ),
+        h(
+          'div',
+          { className: 'mc-matrixScroll' },
+          ['needs', 'running', 'idle'].map((group) =>
+            h(
+              'div',
+              { key: group },
+              h('div', { className: 'mc-groupHead' }, `${t(`group.${group}`)} · ${groups[group].length}`),
+              groups[group].length === 0
+                ? h('div', { className: 'mc-groupEmpty' }, t(`groupEmpty.${group}`))
+                : groups[group].map((view) =>
+                    h(MatrixRow, {
+                      key: view.id,
+                      view,
+                      model,
+                      t,
+                      now,
+                      selected: selectedId === view.id,
+                      selectedId,
+                      onSelect,
+                      onOpen,
+                      expanded,
+                      onToggle,
+                      level: 0,
+                    }),
+                  ),
+            ),
+          ),
+        ),
+      );
+    }
+    // #endregion
+
+    // #region drawer
     function Drawer(props) {
       const { view, model, t, now, onClose, onOpen, onOpenParent } = props;
       const values = view.values || {};
@@ -757,11 +986,7 @@ window.__ModuleLoader__.load({
           'div',
           { className: 'mc-drawerHead' },
           h('h2', { className: 'mc-drawerTitle' }, view.title),
-          h(
-            'button',
-            { type: 'button', className: 'mc-btn', onClick: onClose, title: t('action.close'), 'aria-label': t('action.close') },
-            '✕',
-          ),
+          h('button', { type: 'button', className: 'mc-btn', onClick: onClose, title: t('action.close'), 'aria-label': t('action.close') }, '✕'),
         ),
         h(
           'div',
@@ -807,11 +1032,8 @@ window.__ModuleLoader__.load({
                   h('div', { style: { overflowWrap: 'anywhere' } }, String(goal.goal.objective || '')),
                   h(
                     'div',
-                    { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11.5 } },
-                    [
-                      goalPhase ? t(`drawer.goalPhase.${goalPhase}`) : '',
-                      isNum(goal.roundsStarted) ? t('drawer.round').replace('{n}', String(goal.roundsStarted)) : '',
-                    ]
+                    { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11, fontFamily: MONO } },
+                    [goalPhase ? t(`drawer.goalPhase.${goalPhase}`) : '', isNum(goal.roundsStarted) ? t('drawer.round').replace('{n}', String(goal.roundsStarted)) : '']
                       .filter(Boolean)
                       .join(' · '),
                   ),
@@ -914,18 +1136,8 @@ window.__ModuleLoader__.load({
             'section',
             { className: 'mc-section' },
             h('div', { className: 'mc-sectionTitle' }, t('drawer.output')),
-            h(
-              'div',
-              { className: 'mc-zone' },
-              h('span', { className: 'mc-zoneTitle' }, t('drawer.fileZone')),
-              h('span', null, t('drawer.comingV1b')),
-            ),
-            h(
-              'div',
-              { className: 'mc-zone' },
-              h('span', { className: 'mc-zoneTitle' }, t('drawer.dialogZone')),
-              h('span', null, t('drawer.comingV1b')),
-            ),
+            h('div', { className: 'mc-zone' }, h('span', { className: 'mc-zoneTitle' }, t('drawer.fileZone')), h('span', null, t('drawer.comingV1b'))),
+            h('div', { className: 'mc-zone' }, h('span', { className: 'mc-zoneTitle' }, t('drawer.dialogZone')), h('span', null, t('drawer.comingV1b'))),
           ),
         ),
         h(
@@ -946,7 +1158,7 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: 'mc-banner', role: 'status' },
-        h('div', { className: 'mc-bannerHead' }, `⚠ ${t('group.needs')} · ${views.length}`),
+        h('div', { className: 'mc-bannerHead' }, `⚠ ${t('group.needs')} · ${String(views.length).padStart(2, '0')}`),
         h(
           'div',
           { className: 'mc-bannerRows' },
@@ -963,6 +1175,7 @@ window.__ModuleLoader__.load({
         ),
       );
     }
+    // #endregion
 
     function MissionPanel(props) {
       const { t, useSessions, useSessionStatus, useWorkspaces } = props;
@@ -975,6 +1188,7 @@ window.__ModuleLoader__.load({
       const [query, setQuery] = React.useState('');
       const [quiet, setQuiet] = React.useState(false);
       const [workspaceFilter, setWorkspaceFilter] = React.useState('all');
+      const [viewMode, setViewMode] = React.useState('board');
       const [expanded, setExpanded] = React.useState({});
       const [now, setNow] = React.useState(() => Date.now());
       const searchRef = React.useRef(null);
@@ -997,18 +1211,9 @@ window.__ModuleLoader__.load({
         return map;
       }, [workspaces]);
 
-      const model = React.useMemo(
-        () => buildModel({ list, statuses, workspaceTitles }),
-        [list, statuses, workspaceTitles],
-      );
-      const groups = React.useMemo(
-        () => groupedRoots(model, filter, query, workspaceFilter),
-        [model, filter, query, workspaceFilter],
-      );
-      const needs = React.useMemo(
-        () => model.roots.filter((root) => !!root.pending),
-        [model],
-      );
+      const model = React.useMemo(() => buildModel({ list, statuses, workspaceTitles }), [list, statuses, workspaceTitles]);
+      const groups = React.useMemo(() => groupedRoots(model, filter, query, workspaceFilter), [model, filter, query, workspaceFilter]);
+      const needs = React.useMemo(() => model.roots.filter((root) => !!root.pending), [model]);
       const visibleIds = React.useMemo(() => collectVisibleIds(groups, expanded, model), [groups, expanded, model]);
 
       const runningCount = model.roots.filter((root) => root.running && !root.pending).length;
@@ -1016,6 +1221,17 @@ window.__ModuleLoader__.load({
       const idleCount = model.roots.filter((root) => !root.running && !root.pending).length;
       const phase = list && typeof list.phase === 'string' ? list.phase : 'pending';
       const selected = selectedId ? model.views.get(selectedId) : undefined;
+
+      const focusPanel = React.useCallback(() => {
+        const node = rootRef.current;
+        if (node && typeof node.focus === 'function') {
+          try {
+            node.focus({ preventScroll: true });
+          } catch {
+            node.focus();
+          }
+        }
+      }, []);
 
       const openSession = React.useCallback(
         (id) => {
@@ -1058,16 +1274,6 @@ window.__ModuleLoader__.load({
         };
       }, [phase, model, props.refreshProjections]);
 
-      const focusPanel = React.useCallback(() => {
-        const node = rootRef.current;
-        if (node && typeof node.focus === 'function') {
-          try {
-            node.focus({ preventScroll: true });
-          } catch {
-            node.focus();
-          }
-        }
-      }, []);
       const selectRow = React.useCallback(
         (id) => {
           setSelectedId(id);
@@ -1115,6 +1321,9 @@ window.__ModuleLoader__.load({
               event.preventDefault();
               setSelectedId(null);
             }
+          } else if (key === 'v' || key === 'V') {
+            event.preventDefault();
+            setViewMode((previous) => (previous === 'board' ? 'list' : 'board'));
           } else if (key === 'f' || key === 'F') {
             event.preventDefault();
             setFilter((previous) => (previous === 'all' ? 'active' : previous === 'active' ? 'needs' : 'all'));
@@ -1130,16 +1339,14 @@ window.__ModuleLoader__.load({
         [move, selectedId, openSession],
       );
 
-      if (!list || !list.byId) {
-        return h('div', { className: 'mc-root' }, h('div', { className: 'mc-center' }, t('errors.noStore')));
-      }
+      if (!list || !list.byId) return h('div', { className: 'mc-root' }, h('div', { className: 'mc-center' }, t('errors.noStore')));
 
       const workspaceNames = [];
-      const seen = new Set();
+      const seenWorkspaces = new Set();
       for (const workspace of (workspaces && workspaces.items) || []) {
         const name = workspace && (workspace.title || workspace.path);
-        if (typeof name !== 'string' || name === '' || seen.has(name)) continue;
-        seen.add(name);
+        if (typeof name !== 'string' || name === '' || seenWorkspaces.has(name)) continue;
+        seenWorkspaces.add(name);
         workspaceNames.push(name);
       }
 
@@ -1157,66 +1364,70 @@ window.__ModuleLoader__.load({
         h(
           'header',
           { className: 'mc-head' },
+          h('div', { className: 'mc-brand' }, h('h1', { className: 'mc-title' }, h('span', { className: 'mc-titleMark', 'aria-hidden': true }, '◆'), t('title'))),
           h(
             'div',
-            { className: 'mc-headTitle' },
-            h('h1', { className: 'mc-title' }, t('title')),
-            h('span', { className: 'mc-sub' }, t('subtitle')),
-          ),
-          h(
-            'div',
-            { className: 'mc-counts' },
-            h('span', { className: 'mc-count' }, h(Dot, { state: 'running' }), h('span', { className: 'mc-countNum' }, String(runningCount)), t('count.running')),
-            h('span', { className: 'mc-count' }, h(Dot, { state: 'needs' }), h('span', { className: 'mc-countNum' }, String(needsCount)), t('count.needs')),
-            h('span', { className: 'mc-count' }, h(Dot, { state: 'idle' }), h('span', { className: 'mc-countNum' }, String(idleCount)), t('count.idle')),
+            { className: 'mc-telemetry', role: 'group', 'aria-label': t('column.task') },
+            h('span', { className: 'mc-stat', 'data-tone': 'run' }, h(Dot, { state: 'running' }), h('span', { className: 'mc-statNum' }, String(runningCount).padStart(2, '0')), t('count.running')),
+            h('span', { className: 'mc-stat', 'data-tone': 'needs' }, h(Dot, { state: 'needs' }), h('span', { className: 'mc-statNum' }, String(needsCount).padStart(2, '0')), t('count.needs')),
+            h('span', { className: 'mc-stat' }, h(Dot, { state: 'idle' }), h('span', { className: 'mc-statNum' }, String(idleCount).padStart(2, '0')), t('count.idle')),
           ),
           h('div', { className: 'mc-headSpacer' }),
-          workspaceNames.length > 1
-            ? h(
-                'select',
-                {
-                  className: 'mc-btn',
-                  value: workspaceFilter,
-                  'aria-label': t('column.task'),
-                  onChange: (event) => setWorkspaceFilter(event.target.value),
+          h(
+            'div',
+            { className: 'mc-tools' },
+            h(
+              'div',
+              { className: 'mc-seg', role: 'group', 'aria-label': t('view.board') },
+              h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'board' ? 'true' : 'false', onClick: () => setViewMode('board') }, t('view.board')),
+              h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'list' ? 'true' : 'false', onClick: () => setViewMode('list') }, t('view.list')),
+            ),
+            workspaceNames.length > 1
+              ? h(
+                  'select',
+                  {
+                    className: 'mc-select',
+                    value: workspaceFilter,
+                    'aria-label': t('column.task'),
+                    onChange: (event) => setWorkspaceFilter(event.target.value),
+                  },
+                  h('option', { value: 'all' }, t('allWorkspaces')),
+                  workspaceNames.map((name) => h('option', { key: name, value: name }, name)),
+                )
+              : null,
+            h(
+              'label',
+              { className: 'mc-search' },
+              h('input', {
+                ref: searchRef,
+                type: 'text',
+                value: query,
+                placeholder: t('search'),
+                'aria-label': t('search'),
+                onChange: (event) => setQuery(event.target.value),
+                onKeyDown: (event) => {
+                  if (event.key === 'Escape') {
+                    setQuery('');
+                    event.currentTarget.blur();
+                    event.stopPropagation();
+                  }
                 },
-                h('option', { value: 'all' }, t('allWorkspaces')),
-                workspaceNames.map((name) => h('option', { key: name, value: name }, name)),
-              )
-            : null,
-          h(
-            'label',
-            { className: 'mc-search' },
-            h('input', {
-              ref: searchRef,
-              type: 'text',
-              value: query,
-              placeholder: t('search'),
-              'aria-label': t('search'),
-              onChange: (event) => setQuery(event.target.value),
-              onKeyDown: (event) => {
-                if (event.key === 'Escape') {
-                  setQuery('');
-                  event.currentTarget.blur();
-                  event.stopPropagation();
-                }
+              }),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'mc-btn',
+                onClick: () => setFilter((previous) => (previous === 'all' ? 'active' : previous === 'active' ? 'needs' : 'all')),
               },
-            }),
-          ),
-          h(
-            'button',
-            { type: 'button', className: 'mc-btn', onClick: () => setFilter((previous) => (previous === 'all' ? 'active' : previous === 'active' ? 'needs' : 'all')) },
-            t(`filter.${filter}`),
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'mc-btn',
-              'aria-pressed': quiet ? 'true' : 'false',
-              onClick: () => setQuiet((previous) => !previous),
-            },
-            t('quiet'),
+              t(`filter.${filter}`),
+            ),
+            h(
+              'button',
+              { type: 'button', className: 'mc-btn', 'aria-pressed': quiet ? 'true' : 'false', onClick: () => setQuiet((previous) => !previous) },
+              t('quiet'),
+            ),
           ),
         ),
         h(Banner, { views: needs, t, now, onSelect: selectRow }),
@@ -1227,69 +1438,14 @@ window.__ModuleLoader__.load({
             ? h('div', { className: 'mc-empty' }, t('loading'))
             : model.roots.length === 0
               ? h('div', { className: 'mc-empty' }, t('empty'))
-              : h(
-                  'div',
-                  { className: 'mc-table', role: 'list' },
-                  h(
-                    'div',
-                    { className: 'mc-headRow' },
-                    h('span', null, ''),
-                    h('span', null, t('column.task')),
-                    h('span', null, t('column.chain')),
-                    h('span', null, t('column.progress')),
-                    h('span', { className: 'mc-colCtx' }, t('column.context')),
-                    h('span', null, t('column.activity')),
-                    h('span', { className: 'mc-colOut' }, t('column.output')),
-                    h('span', null, ''),
-                  ),
-                  ['needs', 'running', 'idle'].map((group) =>
-                    h(
-                      'div',
-                      { key: group },
-                      h('div', { className: 'mc-groupHead' }, `${t(`group.${group}`)} · ${groups[group].length}`),
-                      groups[group].length === 0
-                        ? h('div', { className: 'mc-groupEmpty' }, t(`groupEmpty.${group}`))
-                        : groups[group].map((view) =>
-                            h(Row, {
-                              key: view.id,
-                              view,
-                              model,
-                              t,
-                              now,
-                              selected: selectedId === view.id,
-                              selectedId,
-                              onSelect: selectRow,
-                              onOpen: openSession,
-                              expanded,
-                              onToggle: toggleRow,
-                              level: 0,
-                            }),
-                          ),
-                    ),
-                  ),
-                ),
+              : viewMode === 'board'
+                ? h(Board, { groups, model, t, now, selectedId, onSelect: selectRow, onOpen: openSession, expanded, onToggle: toggleRow })
+                : h(Matrix, { groups, model, t, now, selectedId, onSelect: selectRow, onOpen: openSession, expanded, onToggle: toggleRow }),
         ),
-        selected
-          ? h(Drawer, {
-              view: selected,
-              model,
-              t,
-              now,
-              onClose: () => setSelectedId(null),
-              onOpen: openSession,
-              onOpenParent: openSession,
-            })
-          : null,
-        h(
-          'footer',
-          { className: 'mc-foot' },
-          h('span', null, t('footer')),
-          h('div', { className: 'mc-footSpacer' }),
-          h('span', null, t('readonly')),
-        ),
+        selected ? h(Drawer, { view: selected, model, t, now, onClose: () => setSelectedId(null), onOpen: openSession, onOpenParent: openSession }) : null,
+        h('footer', { className: 'mc-foot' }, h('span', null, t('footer')), h('div', { className: 'mc-footSpacer' }), h('span', null, t('readonly'))),
       );
     }
-    // #endregion
 
     // #region plugin
     function apply(ctx) {
@@ -1305,9 +1461,6 @@ window.__ModuleLoader__.load({
       );
       const t = ctx.locale.bind(NS);
 
-      // Business props for the page: navigation back into the Conversation and a
-      // lazy projection pull for cold rows. Client services stay out of the
-      // component tree so the page itself never re-implements Host behaviour.
       const pageProps = {
         openSession: (id) => {
           try {
@@ -1330,12 +1483,7 @@ window.__ModuleLoader__.load({
 
       ctx.slots.inject('main', () =>
         ctx.slots.register(
-          {
-            name: 'main',
-            key: PANEL_ID,
-            locale: NS,
-            inject: () => pageProps,
-          },
+          { name: 'main', key: PANEL_ID, locale: NS, inject: () => pageProps },
           function MainPage(props) {
             return h(PanelBoundary, { label: t('crashed') }, h(MissionPanel, props));
           },
@@ -1343,21 +1491,61 @@ window.__ModuleLoader__.load({
       );
 
       ctx.slots.inject('sidebar.panellist', () =>
-        ctx.slots.register(
-          {
-            name: 'sidebar.panellist',
-            id: PANEL_ID,
-            order: 20,
-            locale: NS,
-            label: () => t('panel'),
-          },
-          MissionIcon,
-        ),
+        ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 20, locale: NS, label: () => t('panel') }, MissionIcon),
       );
+
+      // Global toggle: the sidebar's panel list is hidden while it is collapsed.
+      ctx.effect(() => {
+        let dispose = () => {};
+        try {
+          dispose = ctx.shortcuts.register({
+            id: 'mission.open',
+            label: () => t('shortcut.open'),
+            aliases: ['command centre', 'command center', 'mission control', 'panel'],
+            defaults: {
+              'desktop:macos': { code: 'KeyP', modifiers: ['primary'] },
+              'desktop:windows': { code: 'KeyP', modifiers: ['primary'] },
+              'desktop:linux': { code: 'KeyP', modifiers: ['primary'] },
+              'web:macos': { code: 'KeyP', modifiers: ['primary', 'alt'] },
+              'web:windows': { code: 'KeyP', modifiers: ['primary', 'alt'] },
+              'web:linux': { code: 'KeyP', modifiers: ['primary', 'alt'] },
+            },
+            regions: ['page', 'editable', 'terminal'],
+            modals: [],
+            resolve: () => ({
+              status: 'handled',
+              run: () => {
+                let current = null;
+                try {
+                  const source = ctx.layout && ctx.layout.panelInfo;
+                  const snapshot = source && typeof source.getSnapshot === 'function' ? source.getSnapshot() : undefined;
+                  current = snapshot && typeof snapshot.activePanelId === 'string' ? snapshot.activePanelId : null;
+                } catch {
+                  current = null;
+                }
+                try {
+                  ctx.layout.selectPanel(current === PANEL_ID ? null : PANEL_ID);
+                } catch {
+                  /* the panel may be mid-unload; the shortcut stays harmless */
+                }
+              },
+            }),
+          });
+        } catch {
+          /* a profile without the shortcuts service still gets the panel + icon */
+        }
+        return () => {
+          try {
+            dispose();
+          } catch {
+            /* already disposed by the host */
+          }
+        };
+      }, 'mission-control: open shortcut');
     }
 
     return {
-      inject: ['slots', 'layout', 'locale', 'sessions'],
+      inject: ['slots', 'layout', 'locale', 'sessions', 'shortcuts'],
       apply,
     };
   },
