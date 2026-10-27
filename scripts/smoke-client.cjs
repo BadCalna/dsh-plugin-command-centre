@@ -379,7 +379,8 @@ function expand(node) {
       return expand(instance.render());
     }
     if (typeof type === 'function') {
-      resetHooks();
+      // Hook positions are shared by this stub runtime: reset only at the root
+      // component of a pass, never per nested component (MissionPanel → Canvas).
       return expand(type(node.props));
     }
   }
@@ -410,6 +411,51 @@ assert(drawerText.includes('子任务'), 'drawer subagents section renders');
 assert(drawerText.includes('产出'), 'drawer output section renders');
 assert(!/undefined|NaN|\[object Object\]/.test(drawerText), 'drawer output has no undefined/NaN/[object Object]');
 
+// ---- canvas view ----
+const fakeEvent = { stopPropagation() {}, preventDefault() {} };
+function expandPanel() {
+  resetHooks();
+  return expand(React.createElement(main.component, panelProps));
+}
+function countClass(node, className) {
+  if (!node || typeof node !== 'object') return 0;
+  if (Array.isArray(node)) return node.reduce((sum, child) => sum + countClass(child, className), 0);
+  let total = node.props && node.props.className === className ? 1 : 0;
+  for (const child of node.children || []) total += countClass(child, className);
+  return total;
+}
+
+let tree = expandPanel();
+const canvasButton = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === '画布');
+assert(canvasButton, 'canvas view button rendered');
+canvasButton.props.onClick(fakeEvent);
+
+tree = expandPanel();
+assert(countClass(tree, 'mc-canvas') === 1, 'canvas container renders');
+assert(countClass(tree, 'mc-node') === 4, 'canvas renders one node per session (2 roots + 2 subagents)');
+assert(countClass(tree, 'mc-edge') === 2, 'canvas renders one edge per parent link');
+assert(countClass(tree, 'mc-cluster') === 2, 'canvas groups each root subtree in a cluster');
+const canvasText = render(tree);
+for (const [label, needle] of [['node title', '修复登录超时'], ['subagent node', '定位超时'], ['canvas hint', '拖拽平移']]) {
+  assert(canvasText.includes(needle), `canvas ${label} rendered`);
+}
+const badCanvas = canvasText.match(/.{0,60}(undefined|NaN|\[object Object\]).{0,60}/);
+assert(!badCanvas, `canvas output has no undefined/NaN/[object Object] (found: ${badCanvas && badCanvas[0]})`);
+
+// ---- canvas focus entry from a board card ----
+tree = expandPanel();
+const canvasFocusButton = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === '画布');
+assert(canvasFocusButton, 'canvas button still present');
+// switch back to board, then click the ⌗ focus button on the first card
+const boardButton = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === '看板');
+boardButton.props.onClick(fakeEvent);
+tree = expandPanel();
+const focusButton = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === '⌗');
+assert(focusButton, 'card exposes the canvas focus button');
+focusButton.props.onClick(fakeEvent);
+tree = expandPanel();
+assert(countClass(tree, 'mc-canvas') === 1, 'focus switches to the canvas view');
+
 console.log('SMOKE OK');
 console.log(`registered slots: ${registered.map((r) => `${r.options.name}:${r.options.key || r.options.id}`).join(', ')}`);
 console.log(`render length: ${html.length} chars; drawer length: ${drawerText.length} chars`);
@@ -433,6 +479,25 @@ if (process.env.MC_DUMP) {
     .map((line) => line.trim())
     .filter(Boolean)
     .filter((line) => !line.startsWith('.mc-') && line.length < 160);
+  const canvasTextDump = (typeof canvasText === 'string' ? canvasText : '')
+    .replace(/<\/div>|<\/span>|<\/svg>|<\/path>/g, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('.mc-') && line.length < 120);
+  const collect = (node, className, out) => {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) { for (const child of node) collect(child, className, out); return out; }
+    if (node.props && node.props.className === className) out.push(node.props.style || {});
+    for (const child of node.children || []) collect(child, className, out);
+    return out;
+  };
+  console.log('--- CANVAS BOXES ---');
+  console.log(JSON.stringify({ nodes: collect(tree, 'mc-node', []), clusters: collect(tree, 'mc-cluster', []), edges: collect(tree, 'mc-edge', []).length }, null, 1));
+  console.log('--- CANVAS TEXT ---');
+  console.log(canvasTextDump.slice(0, 60).join('\n'));
   console.log('--- DRAWER TEXT ---');
   console.log(drawerLines.join('\n'));
 }

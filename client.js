@@ -35,7 +35,7 @@ window.__ModuleLoader__.load({
         running: '当前没有运行中的任务',
         idle: '没有空闲任务',
       },
-      view: { board: '看板', list: '矩阵' },
+      view: { board: '看板', list: '矩阵', canvas: '画布' },
       column: {
         task: '任务',
         chain: '代理链',
@@ -83,7 +83,7 @@ window.__ModuleLoader__.load({
         unread: '有新结果',
         comingV1b: 'V1b 接入后显示',
       },
-      action: { open: '打开对话', openParent: '打开父对话', close: '关闭', refresh: '刷新' },
+      action: { open: '打开对话', openParent: '打开父对话', close: '关闭', refresh: '刷新', canvas: '在画布中聚焦' },
       filter: { all: '全部', active: '只看活跃', needs: '只看待你' },
       search: '搜索任务…',
       quiet: '安静',
@@ -96,6 +96,15 @@ window.__ModuleLoader__.load({
       crashed: '这个面板渲染出错，已降级为空视图。',
       errors: { noStore: '会话列表不可用' },
       shortcut: { open: '打开 / 返回 Command Centre' },
+      canvas: {
+        fit: '适配',
+        zoomIn: '放大',
+        zoomOut: '缩小',
+        hint: '拖拽平移 · ⌘滚轮缩放 · 0 适配 · 双击打开',
+        root: '主',
+        sub: '子',
+        empty: '没有可画的节点',
+      },
     };
     const EN = {
       panel: 'Command Centre',
@@ -108,7 +117,7 @@ window.__ModuleLoader__.load({
         running: 'Nothing is running right now',
         idle: 'No idle tasks',
       },
-      view: { board: 'Board', list: 'Matrix' },
+      view: { board: 'Board', list: 'Matrix', canvas: 'Canvas' },
       column: {
         task: 'Task',
         chain: 'Agents',
@@ -156,7 +165,7 @@ window.__ModuleLoader__.load({
         unread: 'new result',
         comingV1b: 'Available in V1b',
       },
-      action: { open: 'Open conversation', openParent: 'Open parent', close: 'Close', refresh: 'Refresh' },
+      action: { open: 'Open conversation', openParent: 'Open parent', close: 'Close', refresh: 'Refresh', canvas: 'Focus in canvas' },
       filter: { all: 'All', active: 'Active', needs: 'Waiting' },
       search: 'Search tasks…',
       quiet: 'Quiet',
@@ -169,6 +178,15 @@ window.__ModuleLoader__.load({
       crashed: 'This panel crashed and fell back to an empty view.',
       errors: { noStore: 'Session list unavailable' },
       shortcut: { open: 'Open / return to Command Centre' },
+      canvas: {
+        fit: 'Fit',
+        zoomIn: 'Zoom in',
+        zoomOut: 'Zoom out',
+        hint: 'Drag to pan · ⌘wheel to zoom · 0 to fit · double-click to open',
+        root: 'main',
+        sub: 'sub',
+        empty: 'No nodes to draw',
+      },
     };
     // #endregion
 
@@ -651,6 +669,28 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:12px;font-family:var(--mc-mono)}
 .mc-empty{color:var(--dsw-alias-label-tertiary);font-size:11px;padding:18px 10px;font-family:var(--mc-mono);letter-spacing:.08em;text-transform:uppercase}
 
+/* ---------- node canvas ---------- */
+.mc-canvas{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;touch-action:none;cursor:grab;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 30%,transparent)}
+.mc-canvas[data-panning=true]{cursor:grabbing}
+.mc-canvasWorld{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+.mc-canvasEdges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.mc-edge{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-border-l4) 65%,transparent);stroke-width:1}
+.mc-edge[data-live=true]{stroke:color-mix(in srgb,var(--mc-run) 62%,transparent);stroke-dasharray:6 6;animation:mc-edge-flow 1.4s linear infinite}
+@keyframes mc-edge-flow{to{stroke-dashoffset:-24}}
+.mc-cluster{position:absolute;border:1px dashed color-mix(in srgb,var(--cc-accent) 26%,var(--cc-hair));border-radius:4px;background:color-mix(in srgb,var(--cc-accent) 3%,transparent);pointer-events:none}
+.mc-clusterLabel{position:absolute;transform:translateY(-100%);padding:0 6px;font-family:var(--mc-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-base);border:1px solid var(--cc-hair);border-left:2px solid var(--cc-accent);line-height:15px;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.mc-node{position:absolute;display:flex;flex-direction:column;gap:5px;padding:8px 9px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 94%,transparent);cursor:pointer;box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent);transition:border-color .12s linear}
+.mc-node:hover{border-color:color-mix(in srgb,var(--cc-accent) 45%,var(--cc-hair))}
+.mc-node[data-selected=true]{border-color:var(--cc-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--cc-accent) 40%,transparent),0 0 24px -14px var(--cc-accent)}
+.mc-node[data-state=needs]{border-color:color-mix(in srgb,var(--mc-warn) 52%,var(--cc-hair))}
+.mc-node[data-state=running]{box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent),0 0 0 1px color-mix(in srgb,var(--mc-run) 24%,transparent)}
+.mc-node:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:1px}
+.mc-nodeKind{flex:none;font-family:var(--mc-mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);border:1px solid var(--cc-hair);padding:0 4px;line-height:12px;border-radius:1px}
+.mc-canvasCtl{position:absolute;right:10px;bottom:10px;z-index:3;display:flex;align-items:center;gap:3px;padding:4px 5px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 94%,transparent)}
+.mc-canvasZoom{font-family:var(--mc-mono);font-size:10px;color:var(--dsw-alias-label-tertiary);min-width:40px;text-align:center;font-variant-numeric:tabular-nums}
+.mc-canvasHint{position:absolute;left:10px;bottom:12px;z-index:3;color:var(--dsw-alias-label-tertiary);font-family:var(--mc-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;pointer-events:none}
+.mc-canvasEmpty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:11px;font-family:var(--mc-mono);letter-spacing:.08em;text-transform:uppercase}
+
 @media (max-width:980px){.mc-board{grid-template-columns:repeat(3,minmax(206px,1fr))}.mc-headRow,.mc-row{grid-template-columns:20px minmax(0,1fr) 78px 110px 52px 26px}.mc-colCtx,.mc-colOut{display:none}}
 @media (max-width:720px){.mc-board{grid-template-columns:1fr;overflow-y:auto}}
 @media (prefers-reduced-motion:reduce){
@@ -729,6 +769,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       const { view, model, t, now, selected, onSelect, onOpen, expanded, onToggle } = props;
       const state = stateOf(view);
       const kids = orderedChildren(view);
+      const focusCanvas = props.onFocusCanvas;
       const kidsOpen = expanded[view.id] !== false;
       const totalKids = view.children.length;
       const moreKids = countDescendants(view, model) - totalKids;
@@ -755,6 +796,22 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           h('span', { className: 'mc-cardTitle', title: view.title }, view.title),
           view.pending ? h('span', { className: 'mc-chip', 'data-tone': 'needs' }, t(`kind.${view.pending.kind}`)) : null,
           view.unread && !view.pending ? h('span', { className: 'mc-chip', 'data-tone': 'ok' }, '·') : null,
+          focusCanvas
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'mc-open',
+                  title: t('action.canvas'),
+                  'aria-label': t('action.canvas'),
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    focusCanvas(view.id);
+                  },
+                },
+                '⌗',
+              )
+            : null,
           h(
             'button',
             {
@@ -856,7 +913,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
     }
 
     function Board(props) {
-      const { groups, model, t, now, selectedId, onSelect, onOpen, expanded, onToggle } = props;
+      const { groups, model, t, now, selectedId, onSelect, onOpen, expanded, onToggle, onFocusCanvas } = props;
       return h(
         'div',
         { className: 'mc-board', role: 'list' },
@@ -887,6 +944,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
                       selected: selectedId === view.id,
                       onSelect,
                       onOpen,
+                      onFocusCanvas,
                       expanded,
                       onToggle,
                     }),
@@ -894,6 +952,348 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             ),
           ),
         ),
+      );
+    }
+    // #endregion
+
+    // #region node canvas
+    const NODE_W = 264;
+    const NODE_H = 92;
+    const NODE_GAP_X = 74;
+    const NODE_GAP_Y = 18;
+    const CLUSTER_PAD = 16;
+    const CLUSTER_GAP = 46;
+    const MIN_ZOOM = 0.35;
+    const MAX_ZOOM = 1.6;
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    /**
+     * Tidy layered layout: one column per depth, leaves stacked in source order,
+     * parents centered on the first/last child. Single-child chains stay straight.
+     */
+    function layoutForest(roots, model) {
+      const nodes = [];
+      const byId = new Map();
+      let cursor = 0;
+      const place = (view, depth) => {
+        const kids = orderedChildren(view).map((child) => model.viewOf(child));
+        let y;
+        if (kids.length === 0) {
+          y = cursor;
+          cursor += NODE_H + NODE_GAP_Y;
+        } else {
+          const placed = kids.map((kid) => place(kid, depth + 1));
+          y = (placed[0].y + placed[placed.length - 1].y) / 2;
+        }
+        const node = {
+          id: view.id,
+          view,
+          depth,
+          x: depth * (NODE_W + NODE_GAP_X),
+          y,
+          w: NODE_W,
+          h: NODE_H,
+          childIds: kids.map((kid) => kid.id),
+        };
+        nodes.push(node);
+        byId.set(node.id, node);
+        return node;
+      };
+
+      const clusters = [];
+      for (const root of roots) {
+        const rootNode = place(root, 0);
+        const subtree = [];
+        const walk = (node) => {
+          subtree.push(node);
+          for (const childId of node.childIds) {
+            const child = byId.get(childId);
+            if (child) walk(child);
+          }
+        };
+        walk(rootNode);
+        clusters.push({
+          id: root.id,
+          title: root.title,
+          x: Math.min(...subtree.map((node) => node.x)) - CLUSTER_PAD,
+          y: Math.min(...subtree.map((node) => node.y)) - CLUSTER_PAD,
+          w: Math.max(...subtree.map((node) => node.x + node.w)) + CLUSTER_PAD - (Math.min(...subtree.map((node) => node.x)) - CLUSTER_PAD),
+          h: Math.max(...subtree.map((node) => node.y + node.h)) + CLUSTER_PAD - (Math.min(...subtree.map((node) => node.y)) - CLUSTER_PAD),
+        });
+        cursor += CLUSTER_GAP;
+      }
+
+      const pad = 40;
+      const minX = Math.min(0, ...nodes.map((node) => node.x));
+      const minY = Math.min(0, ...nodes.map((node) => node.y));
+      const shiftX = pad - minX;
+      const shiftY = pad - minY;
+      for (const node of nodes) {
+        node.x += shiftX;
+        node.y += shiftY;
+      }
+      for (const cluster of clusters) {
+        cluster.x += shiftX;
+        cluster.y += shiftY;
+      }
+
+      const edges = [];
+      for (const node of nodes) {
+        const parentId = node.view.row && typeof node.view.row.parentId === 'string' ? node.view.row.parentId : undefined;
+        const from = parentId ? byId.get(parentId) : undefined;
+        if (!from) continue;
+        const sx = from.x + from.w;
+        const sy = from.y + from.h / 2;
+        const ex = node.x;
+        const ey = node.y + node.h / 2;
+        const reach = Math.max(28, (ex - sx) * 0.45);
+        edges.push({
+          id: `${from.id}->${node.id}`,
+          d: `M ${sx} ${sy} C ${sx + reach} ${sy}, ${ex - reach} ${ey}, ${ex} ${ey}`,
+          live: node.view.running,
+        });
+      }
+
+      const width = Math.max(NODE_W, ...nodes.map((node) => node.x + node.w)) + pad;
+      const height = Math.max(NODE_H, ...nodes.map((node) => node.y + node.h)) + pad;
+      return { nodes, byId, edges, clusters, width, height };
+    }
+
+    function CanvasNode(props) {
+      const { node, model, t, now, selected, onSelect, onOpen } = props;
+      const view = node.view;
+      const state = stateOf(view);
+      const live = liveChildren(view, model);
+      const kids = view.children.length;
+      const chainLabel = kids === 0 ? t('chainMain') : `${t('chainMain')}+${kids}${t('chainChild')}`;
+      return h(
+        'div',
+        {
+          className: 'mc-node',
+          'data-state': state,
+          'data-selected': selected,
+          role: 'button',
+          tabIndex: -1,
+          'aria-current': selected ? 'true' : undefined,
+          title: view.title,
+          style: { left: node.x, top: node.y, width: node.w, height: node.h },
+          onClick: () => onSelect(view.id),
+          onDoubleClick: () => onOpen(view.id),
+        },
+        h(
+          'div',
+          { className: 'mc-cardTop' },
+          h(Dot, { state }),
+          h('span', { className: 'mc-cardTitle' }, view.title),
+          h('span', { className: 'mc-nodeKind' }, view.isChild ? t('canvas.sub') : t('canvas.root')),
+          view.pending ? h('span', { className: 'mc-chip', 'data-tone': 'needs' }, t(`kind.${view.pending.kind}`)) : null,
+        ),
+        h(
+          'div',
+          { className: 'mc-cardMetrics' },
+          h('span', { className: 'mc-metric' }, t('metric.agents'), h('span', { className: 'mc-metricValue', 'data-tone': live > 0 ? 'run' : undefined }, chainLabel)),
+          live > 0 ? h('span', { className: 'mc-chip', 'data-tone': 'run' }, `${live}${t('chainRunning')}`) : null,
+          h('span', { className: 'mc-metric' }, t('metric.context'), h(ContextValue, { context: view.context })),
+        ),
+        h(
+          'div',
+          { className: 'mc-prog' },
+          view.todos
+            ? h(
+                'div',
+                { className: 'mc-bar', role: 'progressbar', 'aria-valuenow': view.todos.done, 'aria-valuemax': view.todos.total },
+                h('div', {
+                  className: 'mc-barFill',
+                  'data-done': view.todos.done === view.todos.total,
+                  style: { width: `${view.todos.total > 0 ? Math.round((view.todos.done / view.todos.total) * 100) : 0}%` },
+                }),
+              )
+            : h('div', { className: 'mc-bar' }),
+          h('span', { className: 'mc-progText' }, view.todos ? `${view.todos.done}/${view.todos.total}` : '—'),
+        ),
+        h(
+          'div',
+          { className: 'mc-cardFoot' },
+          h('span', null, h(RelativeTime, { view, now, t })),
+          h('span', { className: 'mc-cardFootSpacer' }),
+          h('span', { title: t('outputHint') }, `${t('metric.output')} ${t('outputPlaceholder')}`),
+        ),
+      );
+    }
+
+    function Canvas(props) {
+      const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef } = props;
+      const roots = React.useMemo(() => ['needs', 'running', 'idle'].flatMap((state) => groups[state]), [groups]);
+      const layout = React.useMemo(() => layoutForest(roots, model), [roots, model]);
+      const [camera, setCamera] = React.useState({ x: 24, y: 24, k: 1 });
+      const cameraRef = React.useRef(camera);
+      cameraRef.current = camera;
+      const wrapRef = React.useRef(null);
+      const panRef = React.useRef(null);
+      const fittedRef = React.useRef('');
+      const [panning, setPanning] = React.useState(false);
+      const focusId = focus && focus.id ? focus.id : undefined;
+
+      const fit = React.useCallback(
+        (onlyId) => {
+          const wrap = wrapRef.current;
+          if (!wrap) return;
+          const width = wrap.clientWidth;
+          const height = wrap.clientHeight;
+          if (!width || !height) return;
+          let list = layout.nodes;
+          if (onlyId && layout.byId.has(onlyId)) {
+            const keep = new Set();
+            const walk = (id) => {
+              const node = layout.byId.get(id);
+              if (!node) return;
+              keep.add(id);
+              for (const childId of node.childIds) walk(childId);
+            };
+            walk(onlyId);
+            list = layout.nodes.filter((node) => keep.has(node.id));
+          }
+          if (list.length === 0) return;
+          const minX = Math.min(...list.map((node) => node.x));
+          const maxX = Math.max(...list.map((node) => node.x + node.w));
+          const minY = Math.min(...list.map((node) => node.y));
+          const maxY = Math.max(...list.map((node) => node.y + node.h));
+          const pad = 30;
+          const k = clamp(Math.min((width - pad * 2) / Math.max(1, maxX - minX), (height - pad * 2) / Math.max(1, maxY - minY), 1), MIN_ZOOM, 1);
+          setCamera({
+            x: pad + (width - pad * 2 - (maxX - minX) * k) / 2 - minX * k,
+            y: pad + (height - pad * 2 - (maxY - minY) * k) / 2 - minY * k,
+            k,
+          });
+        },
+        [layout],
+      );
+
+      React.useEffect(() => {
+        const key = `${focusId || 'all'}:${focus && focus.nonce ? focus.nonce : 0}:${layout.nodes.length}`;
+        if (fittedRef.current === key) return;
+        fittedRef.current = key;
+        fit(focusId);
+      }, [fit, focusId, focus, layout]);
+
+      React.useEffect(() => {
+        if (fitRef) fitRef.current = () => fit(focusId);
+      }, [fit, fitRef, focusId]);
+
+      React.useEffect(() => {
+        const wrap = wrapRef.current;
+        if (!wrap) return undefined;
+        const onWheel = (event) => {
+          event.preventDefault();
+          const rect = wrap.getBoundingClientRect();
+          const px = event.clientX - rect.left;
+          const py = event.clientY - rect.top;
+          const current = cameraRef.current;
+          if (event.metaKey || event.ctrlKey) {
+            const factor = Math.exp(-event.deltaY * 0.0015);
+            const k = clamp(current.k * factor, MIN_ZOOM, MAX_ZOOM);
+            const ratio = k / current.k;
+            setCamera({ x: px - (px - current.x) * ratio, y: py - (py - current.y) * ratio, k });
+          } else {
+            setCamera({ x: current.x - event.deltaX, y: current.y - event.deltaY, k: current.k });
+          }
+        };
+        wrap.addEventListener('wheel', onWheel, { passive: false });
+        return () => wrap.removeEventListener('wheel', onWheel);
+      }, []);
+
+      const onPointerDown = (event) => {
+        if (event.button !== 0) return;
+        const target = event.target;
+        if (target && typeof target.closest === 'function' && (target.closest('.mc-node') || target.closest('button'))) return;
+        panRef.current = { x: event.clientX, y: event.clientY, camera: cameraRef.current };
+        setPanning(true);
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          /* pointer capture is optional */
+        }
+      };
+      const onPointerMove = (event) => {
+        const pan = panRef.current;
+        if (!pan) return;
+        setCamera({ x: pan.camera.x + (event.clientX - pan.x), y: pan.camera.y + (event.clientY - pan.y), k: pan.camera.k });
+      };
+      const endPan = (event) => {
+        if (!panRef.current) return;
+        panRef.current = null;
+        setPanning(false);
+        try {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        } catch {
+          /* already released */
+        }
+      };
+      const zoomBy = (factor) => {
+        const wrap = wrapRef.current;
+        if (!wrap) return;
+        const current = cameraRef.current;
+        const px = wrap.clientWidth / 2;
+        const py = wrap.clientHeight / 2;
+        const k = clamp(current.k * factor, MIN_ZOOM, MAX_ZOOM);
+        const ratio = k / current.k;
+        setCamera({ x: px - (px - current.x) * ratio, y: py - (py - current.y) * ratio, k });
+      };
+
+      return h(
+        'div',
+        {
+          className: 'mc-canvas',
+          ref: wrapRef,
+          'data-panning': panning,
+          onPointerDown,
+          onPointerMove,
+          onPointerUp: endPan,
+          onPointerCancel: endPan,
+        },
+        layout.nodes.length === 0
+          ? h('div', { className: 'mc-canvasEmpty' }, t('canvas.empty'))
+          : h(
+              'div',
+              { className: 'mc-canvasWorld', style: { transform: `translate3d(${camera.x}px, ${camera.y}px, 0) scale(${camera.k})` } },
+              h(
+                'svg',
+                { className: 'mc-canvasEdges', width: layout.width, height: layout.height, viewBox: `0 0 ${layout.width} ${layout.height}`, 'aria-hidden': true },
+                layout.edges.map((edge) => h('path', { key: edge.id, className: 'mc-edge', 'data-live': edge.live ? 'true' : 'false', d: edge.d })),
+              ),
+              layout.clusters.map((cluster) =>
+                h(
+                  React.Fragment,
+                  { key: `cluster:${cluster.id}` },
+                  h('div', { className: 'mc-cluster', style: { left: cluster.x, top: cluster.y, width: cluster.w, height: cluster.h } }),
+                  h('div', { className: 'mc-clusterLabel', style: { left: cluster.x, top: cluster.y } }, cluster.title),
+                ),
+              ),
+              layout.nodes.map((node) =>
+                h(CanvasNode, {
+                  key: node.id,
+                  node,
+                  model,
+                  t,
+                  now,
+                  selected: selectedId === node.id,
+                  onSelect,
+                  onOpen,
+                }),
+              ),
+            ),
+        h(
+          'div',
+          { className: 'mc-canvasCtl' },
+          h('button', { type: 'button', className: 'mc-btn', title: t('canvas.fit'), 'aria-label': t('canvas.fit'), onClick: () => fit(focusId) }, '⌖'),
+          h('button', { type: 'button', className: 'mc-btn', title: t('canvas.zoomOut'), 'aria-label': t('canvas.zoomOut'), onClick: () => zoomBy(1 / 1.25) }, '−'),
+          h('span', { className: 'mc-canvasZoom' }, `${Math.round(camera.k * 100)}%`),
+          h('button', { type: 'button', className: 'mc-btn', title: t('canvas.zoomIn'), 'aria-label': t('canvas.zoomIn'), onClick: () => zoomBy(1.25) }, '+'),
+        ),
+        h('div', { className: 'mc-canvasHint' }, t('canvas.hint')),
       );
     }
     // #endregion
@@ -1293,6 +1693,8 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       const [quiet, setQuiet] = React.useState(false);
       const [workspaceFilter, setWorkspaceFilter] = React.useState('all');
       const [viewMode, setViewMode] = React.useState('board');
+      const [canvasFocus, setCanvasFocus] = React.useState({ id: null, nonce: 0 });
+      const canvasFitRef = React.useRef(null);
       const [expanded, setExpanded] = React.useState({});
       const [now, setNow] = React.useState(() => Date.now());
       const searchRef = React.useRef(null);
@@ -1427,13 +1829,18 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             }
           } else if (key === 'v' || key === 'V') {
             event.preventDefault();
-            setViewMode((previous) => (previous === 'board' ? 'list' : 'board'));
+            setViewMode((previous) => (previous === 'board' ? 'list' : previous === 'list' ? 'canvas' : 'board'));
           } else if (key === 'f' || key === 'F') {
             event.preventDefault();
             setFilter((previous) => (previous === 'all' ? 'active' : previous === 'active' ? 'needs' : 'all'));
           } else if (key === 's' || key === 'S') {
             event.preventDefault();
             setQuiet((previous) => !previous);
+          } else if (key === '0') {
+            if (canvasFitRef.current) {
+              event.preventDefault();
+              canvasFitRef.current();
+            }
           } else if (key === '/') {
             event.preventDefault();
             const input = searchRef.current;
@@ -1485,6 +1892,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
               { className: 'mc-seg', role: 'group', 'aria-label': t('view.board') },
               h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'board' ? 'true' : 'false', onClick: () => setViewMode('board') }, t('view.board')),
               h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'list' ? 'true' : 'false', onClick: () => setViewMode('list') }, t('view.list')),
+              h('button', { type: 'button', className: 'mc-segBtn', 'aria-pressed': viewMode === 'canvas' ? 'true' : 'false', onClick: () => setViewMode('canvas') }, t('view.canvas')),
             ),
             workspaceNames.length > 1
               ? h(
@@ -1543,8 +1951,34 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             : model.roots.length === 0
               ? h('div', { className: 'mc-empty' }, t('empty'))
               : viewMode === 'board'
-                ? h(Board, { groups, model, t, now, selectedId, onSelect: selectRow, onOpen: openSession, expanded, onToggle: toggleRow })
-                : h(Matrix, { groups, model, t, now, selectedId, onSelect: selectRow, onOpen: openSession, expanded, onToggle: toggleRow }),
+                ? h(Board, {
+                    groups,
+                    model,
+                    t,
+                    now,
+                    selectedId,
+                    onSelect: selectRow,
+                    onOpen: openSession,
+                    expanded,
+                    onToggle: toggleRow,
+                    onFocusCanvas: (id) => {
+                      setCanvasFocus({ id, nonce: Date.now() });
+                      setViewMode('canvas');
+                    },
+                  })
+                : viewMode === 'list'
+                  ? h(Matrix, { groups, model, t, now, selectedId, onSelect: selectRow, onOpen: openSession, expanded, onToggle: toggleRow })
+                  : h(Canvas, {
+                      groups,
+                      model,
+                      t,
+                      now,
+                      selectedId,
+                      onSelect: selectRow,
+                      onOpen: openSession,
+                      focus: canvasFocus,
+                      fitRef: canvasFitRef,
+                    }),
         ),
         selected
           ? h(
