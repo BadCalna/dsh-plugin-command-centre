@@ -462,8 +462,8 @@ body[data-ds-dark-theme] .mc-root{--cc-accent:#57e2ff;--cc-accent-ink:#57e2ff;--
 .mc-head{flex:none;display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 16px;padding:10px 20px 9px;border-bottom:1px solid var(--cc-hair);position:relative}
 html[data-platform=darwin] .mc-head{padding-top:calc(10px + var(--dsh-frame-top-clearance,0px));padding-left:max(20px,var(--dsh-frame-leading-clearance,0px))}
 .mc-head::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,var(--cc-accent),transparent);opacity:.5}
-.mc-head::before{content:"";position:absolute;left:0;bottom:-1px;width:26%;height:1px;background:linear-gradient(90deg,transparent,var(--cc-accent),transparent);opacity:.55;will-change:transform;animation:mc-sweep 7s cubic-bezier(.4,0,.2,1) infinite}
-@keyframes mc-sweep{0%,74%{transform:translateX(-110%)}100%{transform:translateX(430%)}}
+.mc-head::before{content:"";position:absolute;left:0;bottom:-2px;width:30%;height:2px;background:linear-gradient(90deg,transparent,var(--cc-accent),transparent);opacity:.9;box-shadow:0 0 14px 0 var(--cc-glow);will-change:transform;animation:mc-sweep 5.5s cubic-bezier(.4,0,.2,1) infinite}
+@keyframes mc-sweep{0%,70%{transform:translateX(-110%)}100%{transform:translateX(400%)}}
 .mc-brand{display:flex;align-items:center;gap:8px;min-width:0}
 .mc-titleMark{flex:none;display:inline-flex;color:var(--cc-accent)}
 .mc-title{margin:0;font-family:var(--mc-mono);font-size:13px;font-weight:600;line-height:20px;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap;font-variant-numeric:tabular-nums slashed-zero;font-feature-settings:"zero" 1,"tnum" 1}
@@ -505,12 +505,17 @@ body[data-ds-dark-theme] .mc-title{text-shadow:0 0 18px color-mix(in srgb,var(--
 .mc-bannerWho{color:var(--dsw-alias-label-tertiary);font-size:10px;white-space:nowrap;font-family:var(--mc-mono);letter-spacing:.06em;text-transform:uppercase}
 
 /* ---------- body / board ---------- */
-.mc-body{flex:1 1 auto;min-height:0;overflow:hidden;display:flex;flex-direction:column;padding:9px 14px 6px}
+.mc-body{flex:1 1 auto;min-height:0;overflow:hidden;display:flex;flex-direction:column;padding:9px 14px 6px;position:relative}
+.mc-body::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(100deg,transparent 42%,color-mix(in srgb,var(--cc-accent) 9%,transparent) 50%,transparent 58%);transform:translateX(-120%);animation:mc-scan 9s linear infinite}
+@keyframes mc-scan{0%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
+.mc-board,.mc-matrix{position:relative;z-index:1}
 .mc-board{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(232px,1fr));gap:10px;overflow-x:auto;overflow-y:hidden;padding-bottom:2px}
 .mc-col{min-width:0;display:flex;flex-direction:column;min-height:0;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 52%,transparent);position:relative}
 .mc-col::after{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,var(--mc-col-accent,var(--cc-hair)),transparent 72%)}
 .mc-col[data-state=needs]{--mc-col-accent:var(--mc-warn)}
 .mc-col[data-state=running]{--mc-col-accent:var(--mc-run)}
+.mc-col[data-state=running]::after{background:linear-gradient(90deg,transparent,var(--mc-run),transparent);background-size:38% 100%;background-repeat:no-repeat;animation:mc-col-scan 3.6s linear infinite}
+@keyframes mc-col-scan{0%{background-position:-40% 0}100%{background-position:140% 0}}
 .mc-col[data-state=idle]{--mc-col-accent:var(--mc-idle)}
 .mc-colHead{flex:none;display:flex;align-items:center;gap:8px;padding:9px 10px 7px;border-bottom:1px solid var(--cc-hair);position:relative;--cut:11px;clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
 .mc-colIndex{font-family:var(--mc-mono);font-size:8.5px;letter-spacing:.12em;color:var(--dsw-alias-label-tertiary);border:1px solid var(--cc-hair);padding:0 4px;line-height:13px;border-radius:1px}
@@ -530,7 +535,8 @@ body[data-ds-dark-theme] .mc-title{text-shadow:0 0 18px color-mix(in srgb,var(--
 }
 @keyframes mc-card-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .mc-card[data-state=needs]{--mc-card-accent:var(--mc-warn)}
-.mc-card[data-state=running]{--mc-card-accent:var(--mc-run)}
+.mc-card[data-state=running]{--mc-card-accent:var(--mc-run);animation:mc-card-in .18s cubic-bezier(.2,.8,.2,1) both,mc-live 3.2s ease-in-out infinite}
+@keyframes mc-live{0%,100%{box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 5%,transparent),0 0 0 1px color-mix(in srgb,var(--mc-run) 10%,transparent)}50%{box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 5%,transparent),0 0 0 1px color-mix(in srgb,var(--mc-run) 34%,transparent),0 0 22px -10px var(--mc-run)}}
 .mc-card[data-state=done]{--mc-card-accent:var(--mc-ok)}
 .mc-card[data-state=idle]{--mc-card-accent:var(--mc-idle)}
 .mc-card::before,.mc-card::after{content:"";position:absolute;width:9px;height:9px;pointer-events:none;border:1px solid var(--cc-hair-hi);opacity:.5;transition:opacity .12s linear,border-color .12s linear}
@@ -567,7 +573,8 @@ body[data-ds-dark-theme] .mc-card[data-state=running] .mc-cardTitle{text-shadow:
 /* ---------- status marks ---------- */
 .mc-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--mc-idle);margin-top:5px}
 .mc-dot[data-state=needs]{width:8px;height:8px;border-radius:0;background:var(--mc-warn);clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);box-shadow:none}
-.mc-dot[data-state=running]{background:var(--mc-run);box-shadow:0 0 0 1px color-mix(in srgb,var(--mc-run) 55%,transparent),0 0 6px 0 color-mix(in srgb,var(--mc-run) 55%,transparent),0 0 14px 2px color-mix(in srgb,var(--mc-run) 16%,transparent);animation:mc-breathe 2.4s cubic-bezier(.45,0,.55,1) infinite}
+.mc-dot[data-state=running]{background:var(--mc-run);box-shadow:0 0 0 1px color-mix(in srgb,var(--mc-run) 55%,transparent),0 0 6px 0 color-mix(in srgb,var(--mc-run) 55%,transparent),0 0 14px 2px color-mix(in srgb,var(--mc-run) 16%,transparent);animation:mc-breathe 2.4s cubic-bezier(.45,0,.55,1) infinite,mc-beat 2.4s ease-in-out infinite}
+@keyframes mc-beat{0%,100%{transform:scale(1)}50%{transform:scale(1.4)}}
 .mc-dot[data-state=done]{background:var(--mc-ok);box-shadow:0 0 0 1px color-mix(in srgb,var(--mc-ok) 40%,transparent)}
 .mc-dot[data-state=err]{background:var(--mc-err);animation:mc-fault 4.5s steps(1,end) infinite}
 @keyframes mc-breathe{0%,100%{opacity:1}50%{opacity:.62}}
@@ -651,6 +658,10 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
   .mc-head::before{animation:none;opacity:0}
   .mc-dot[data-state=running]{animation:none;box-shadow:0 0 0 1px var(--mc-run)}
   .mc-dot[data-state=err]{animation:none}
+  .mc-dot[data-state=running]{animation:none}
+  .mc-card[data-state=running]{animation:none}
+  .mc-col[data-state=running]::after{animation:none;background:var(--mc-run);background-size:100% 100%}
+  .mc-body::before{animation:none;opacity:0}
   .mc-drawer{animation:none}
   .mc-card:hover{transform:none}
 }
@@ -1611,15 +1622,17 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
             id: 'mission.open',
             label: () => t('shortcut.open'),
             aliases: ['command centre', 'command center', 'mission control', 'panel'],
-            // ⌘P is taken by the sidebar-files panel (workspace.files), so the
-            // command-palette-style ⇧ is required to keep both commands valid.
+            // ⌘P is taken by the sidebar-files panel (workspace.files); the
+            // command-palette ⇧ keeps both commands valid. Web+Linux admits only
+            // Cmd+/, Cmd+Shift+, and Cmd+Shift+. — leaving it without a default is
+            // required, because register() validates every platform and rejects the
+            // whole command when one of them is unsupported.
             defaults: {
               'desktop:macos': { code: 'KeyP', modifiers: ['primary', 'shift'] },
               'desktop:windows': { code: 'KeyP', modifiers: ['primary', 'shift'] },
               'desktop:linux': { code: 'KeyP', modifiers: ['primary', 'shift'] },
               'web:macos': { code: 'KeyP', modifiers: ['primary', 'shift'] },
               'web:windows': { code: 'KeyP', modifiers: ['primary', 'shift'] },
-              'web:linux': { code: 'KeyP', modifiers: ['primary', 'shift'] },
             },
             regions: ['page', 'editable', 'terminal'],
             modals: [],
@@ -1642,8 +1655,14 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
               },
             }),
           });
-        } catch {
-          /* a profile without the shortcuts service still gets the panel + icon */
+        } catch (error) {
+          // A profile without the shortcuts service still gets the panel + icon,
+          // but a rejected binding must stay diagnosable instead of vanishing.
+          try {
+            console.warn('[command-centre] shortcut registration failed:', error && error.message);
+          } catch {
+            /* console may be unavailable in a stripped build */
+          }
         }
         return () => {
           try {

@@ -20,6 +20,7 @@
 |---|---|
 | 面板挂载 | `main`（`key: 'mission'`）+ `sidebar.panellist`（`id: 'mission'`）必须逐字相同；避开 `conversation`/`plugins`/`schedules` |
 | 快捷键 | `⌘P` 被 `workspace.files` 占用且冲突会被拒绝 → 用 `⌘⇧P`；`⌘B`/`⌘T`/`⌘,`/`⌘/`/`` ⌘` ``/`⌘⌥B`/`⌘⌥O` 也已占用 |
+| 快捷键注册是**全平台预校验** | `register()` 会校验 desktop/web × macOS/Windows/Linux 的所有默认键位，任一平台非法就整条命令失败（不注册、不报错）。Web+Linux 只允许 `⌘/`、`⌘⇧,`、`⌘⇧.` → 插件必须省略 `web:linux` 默认值；注册失败要 `console.warn`，不能静默吞掉 |
 | macOS 标题遮挡 | header 用 `--dsh-frame-top-clearance`（48px）；侧栏收起时再加 `--dsh-frame-leading-clearance`（160px） |
 | 暗色判定 | 宿主在 **`body[data-ds-dark-theme]`** 上切暗色，不是 html |
 | pnpm 安装 | 本地目录是**硬链接**：原地改文件自动同步；**删了重建会断链**（`ln -f` 修回）；重装用 `link:` 更省事 |
