@@ -166,16 +166,37 @@ async function handlePrefs(rawRequest) {
   }
 }
 
+function warn(message, error) {
+  try {
+    console.warn(`[command-centre] ${message}:`, error && error.message ? error.message : error);
+  } catch {
+    /* console may be unavailable in a stripped build */
+  }
+}
+
 export function apply(ctx) {
-  ctx.effect(() => ctx.sessionProjections.register(definition), 'command-centre: missionControl projection');
-  ctx.effect(
-    () =>
-      ctx.connection.fetch.register({
+  // Each contribution is optional on its own: a rejected projection or route must
+  // never take the whole bundle (and with it the panel) down.
+  ctx.effect(() => {
+    try {
+      return ctx.sessionProjections.register(definition);
+    } catch (error) {
+      warn('projection registration failed', error);
+      return () => {};
+    }
+  }, 'command-centre: missionControl projection');
+
+  ctx.effect(() => {
+    try {
+      return ctx.connection.fetch.register({
         path: PREFS_ROUTE,
         methods: ['GET', 'POST'],
         requestBody: 'buffered',
         fetch: (request) => handlePrefs(request),
-      }),
-    'command-centre: canvas prefs route',
-  );
+      });
+    } catch (error) {
+      warn('canvas prefs route registration failed', error);
+      return () => {};
+    }
+  }, 'command-centre: canvas prefs route');
 }
