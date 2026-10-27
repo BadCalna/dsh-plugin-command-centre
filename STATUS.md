@@ -30,15 +30,18 @@
 - 跳转：`o` / `↗` / 双击；键盘 `j k Enter Esc f s v /`；搜索 + 工作区筛选 + 安静模式
 - ErrorBoundary：面板抛错只降级不空白
 
-## 迭代方式（重要）
+## 迭代方式（重要，含一个踩过的坑）
 
-pnpm 装的是**快照副本**，不是软链。改了 `plugin/` 里任何文件：
+pnpm 对本地目录插件用的是**硬链接**（`package.json` / `locale` 与工作区同 inode），不是拷贝：
 
-1. 插件页 → 「Command Centre」→ **卸载**
-2. **安装插件** → 安装源粘贴 `/Users/jaychen/Documents/MissionDashboard/plugin`
-3. 纯 Client 改动（`client.js` / locale / icon）通常热生效；页面还是旧样子先 `⌘R` 刷新，
-   再不行重启 App
-4. **Host half（`index.js`）改动必须重启 App** 才会加载新模块
+- **原地修改**文件（编辑器保存到底、`python open(w)`、`cp` 覆盖）→ 安装目录同 inode，**自动就是新版**，
+  改完按 `⌘R` 刷新页面即可
+- **删了重建 / 编辑器"安全写入"换 inode** → 硬链接断开，安装目录停在旧代码，页面看起来"重装了也没变"
+  （2026-10-27 踩过一次：元数据是新的、`client.js` 还是旧的）
+- 断链修复：`ln -f plugin/client.js ~/.dsh/profiles/desktop/node_modules/@local/dsh-plugin-mission-control/client.js`
+- 彻底避免：重装时用 `link:` 前缀安装（`link:/Users/jaychen/Documents/MissionDashboard/plugin`），
+  pnpm 会建**软链**，任何写入都直接生效
+- Host half（`index.js`）改动仍需重启 App 才会加载新模块
 
 ## 下一步：V1b（产出列）
 

@@ -54,9 +54,10 @@ DSH Web UI 插件：在 `main` 面板里加一个整页「Command Centre」，�
    ```
 3. 左侧面板列表出现「Command Centre」图标；`⌘P` 随时开关
 
-**迭代（重要）**：pnpm 装的是**快照副本**，不是软链。改了 `plugin/` 之后要
-**卸载 → 重新安装**；纯 Client 改动通常热生效，若页面还是旧样子按 `⌘R` 刷新，
-仍不行再重启 App。Host half（`index.js`）改动需要重启 App 才会加载新模块。
+**迭代（重要）**：pnpm 装本地目录用的是**硬链接**（`package.json` / `locale` 与工作区同 inode）。
+原地改文件 → 安装目录自动同步，改完按 `⌘R` 刷新即可；但"删了重建"会断开链接，
+安装目录会停在旧代码（这时用 `ln -f` 修回，或用 `link:` 前缀重装成软链）。
+Host half（`index.js`）改动需要重启 App 才会加载新模块。
 
 ## 数据来源（全部是 Client 现成投影）
 
