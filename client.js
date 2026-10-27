@@ -84,6 +84,10 @@ window.__ModuleLoader__.load({
         dialogue: '对话区',
         paths: '个路径',
         writes: '次写入',
+        deliverables: '个交付物',
+        deliverableChip: '交付',
+        noImageBytes: '读不到图片字节',
+        fileMissing: '文件已不在磁盘上（可能被移动或删除）',
         preview: '文件预览',
         openExternal: '在桌面打开',
         loading: '读取中…',
@@ -211,6 +215,10 @@ window.__ModuleLoader__.load({
         dialogue: 'Dialogue',
         paths: 'paths',
         writes: 'writes',
+        deliverables: 'deliverables',
+        deliverableChip: 'handed off',
+        noImageBytes: 'no image bytes',
+        fileMissing: 'File is no longer on disk (moved or deleted)',
         preview: 'File preview',
         openExternal: 'Open on desktop',
         loading: 'Loading…',
@@ -345,6 +353,19 @@ window.__ModuleLoader__.load({
       return `…/${parts.slice(-tail).join('/')}`;
     }
 
+    /** Content type for a locally rendered image preview. */
+    function mediaType(path) {
+      const name = baseName(path).toLowerCase();
+      const extension = name.slice(name.lastIndexOf('.') + 1);
+      if (extension === 'svg') return 'image/svg+xml';
+      if (extension === 'png') return 'image/png';
+      if (extension === 'gif') return 'image/gif';
+      if (extension === 'webp') return 'image/webp';
+      if (extension === 'avif') return 'image/avif';
+      if (extension === 'bmp') return 'image/bmp';
+      return 'image/jpeg';
+    }
+
     /** Very small markdown flattening: enough for a 200-char answer preview. */
     function plainMarkdown(text) {
       if (typeof text !== 'string') return '';
@@ -381,6 +402,52 @@ window.__ModuleLoader__.load({
         ['md', 'markdown', 'txt', 'log', 'json', 'jsonc', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'scss', 'html', 'htm', 'xml', 'yml', 'yaml', 'toml', 'ini', 'csv', 'tsv', 'sh', 'zsh', 'bash', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cc', 'cpp', 'hpp', 'cs', 'php', 'sql', 'diff', 'patch', 'mjs', 'tex'].includes(extension)
       ) return 'text';
       return 'other';
+    }
+
+    /**
+     * Unwrap one unary Remote call: the gateway resolves `{ ok: true, value }`
+     * or `{ ok: false, error }`, never the bare value. Anything else is passed
+     * through so a stubbed/test double keeps working.
+     */
+    function remoteValue(result) {
+      if (result && typeof result === 'object' && typeof result.ok === 'boolean') {
+        if (!result.ok) {
+          const error = result.error;
+          if (error && typeof error === 'object' && typeof error.message === 'string') throw error;
+          throw new Error(String(error || 'remote call failed'));
+        }
+        return result.value;
+      }
+      return result;
+    }
+
+    /** Friendly text for a preview read failure (deleted deliverables are common). */
+    function fileErrorText(error, t) {
+      const code = error && (error.code || error.name) ? String(error.code || error.name) : '';
+      const message = error && error.message ? String(error.message) : String(error || '');
+      const combined = `${code} ${message}`;
+      if (/FS_NOT_FOUND|ENOENT|not.?found/i.test(combined)) return t('drawer.fileMissing');
+      return message || code || combined;
+    }
+
+    /** Remote readBytes payloads can arrive as Uint8Array, a plain byte array or base64. */
+    function bytesOf(value) {
+      if (!value) return null;
+      if (typeof Uint8Array !== 'undefined' && value instanceof Uint8Array) return value;
+      if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) return new Uint8Array(value);
+      if (Array.isArray(value) && value.every((byte) => typeof byte === 'number')) return new Uint8Array(value);
+      if (value && Array.isArray(value.data)) return bytesOf(value.data);
+      if (typeof value === 'string' && typeof atob === 'function') {
+        try {
+          const binary = atob(value);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+          return bytes;
+        } catch {
+          return null;
+        }
+      }
+      return null;
     }
 
     function percent(part, whole) {
@@ -451,14 +518,25 @@ window.__ModuleLoader__.load({
 
     const FAILED_OUTCOMES = new Set(['error', 'blocked', 'max-tokens']);
 
-    /** Read the Host `missionControl` projection into the UI shape we render. */
+    /**
+     * Read the Host `missionControl` projection into the UI shape we render.
+     * `deliverables` are the files the agent handed over (`present`) — the only
+     * signal that catches artifacts a shell command created, which never pass
+     * through write/edit.
+     */
     function outputOf(values) {
       const raw = values && values.missionControl;
       if (!raw || typeof raw !== 'object') return undefined;
       const files = Array.isArray(raw.files) ? raw.files.filter((entry) => typeof entry === 'string' && entry !== '') : [];
+      const deliverables = Array.isArray(raw.deliverables)
+        ? raw.deliverables
+            .filter((entry) => entry && typeof entry.path === 'string' && entry.path !== '')
+            .map((entry) => ({ path: entry.path, description: typeof entry.description === 'string' ? entry.description : '' }))
+        : [];
       const reason = typeof raw.reason === 'string' ? raw.reason : '';
       return {
         files,
+        deliverables,
         fileCount: Number.isInteger(raw.fileCount) && raw.fileCount > 0 ? raw.fileCount : files.length,
         text: typeof raw.text === 'string' ? raw.text : '',
         tool: typeof raw.tool === 'string' ? raw.tool : '',
@@ -472,6 +550,7 @@ window.__ModuleLoader__.load({
     /** Compact code for the output cell: files first, then answer text, then error. */
     function outputCode(output) {
       if (!output) return undefined;
+      if (output.deliverables.length > 0) return `${output.deliverables.length}D`;
       if (output.files.length > 0 || output.fileCount > 0) return `${Math.max(output.files.length, output.fileCount)}F`;
       if (output.text) return 'TXT';
       if (output.toolError || output.failed) return 'ERR';
@@ -481,6 +560,7 @@ window.__ModuleLoader__.load({
     function outputTitle(output, t) {
       if (!output) return t('drawer.outputPending');
       const parts = [];
+      for (const item of output.deliverables) parts.push(item.description || item.path);
       if (output.files.length > 0) parts.push(output.files.join('\n'));
       if (output.text) parts.push(output.text);
       if (output.toolError) parts.push(`${t('drawer.lastTool')}: ${output.toolError}`);
@@ -858,6 +938,8 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-itemText{min-width:0;overflow-wrap:anywhere}
 .mc-itemText[data-status=completed]{color:var(--dsw-alias-label-tertiary);text-decoration:line-through}
 .mc-itemMeta{margin-left:auto;color:var(--dsw-alias-label-tertiary);font-size:9.5px;white-space:nowrap;font-family:var(--mc-mono);letter-spacing:.08em;text-transform:uppercase}
+.mc-fileRow .mc-itemText{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;overflow-wrap:normal}
+.mc-fileRow .mc-itemMeta{flex:0 1 auto;min-width:0;max-width:42%;overflow:hidden;text-overflow:ellipsis;text-transform:none;letter-spacing:.02em}
 .mc-zone{border:1px dashed var(--cc-hair);border-radius:2px;padding:7px 9px;color:var(--dsw-alias-label-tertiary);font-size:10.5px;display:flex;flex-direction:column;gap:3px;font-family:var(--mc-mono);letter-spacing:.06em}
 .mc-zoneTitle{color:var(--dsw-alias-label-secondary);font-size:9px;font-weight:600;letter-spacing:.16em;text-transform:uppercase}
 .mc-drawerFoot{flex:none;display:flex;gap:7px;padding:9px 14px 13px;border-top:1px solid var(--cc-hair)}
@@ -1386,6 +1468,69 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       return { nodes, byId, edges, width, height };
     }
 
+    /**
+     * Subtree-drag springs. The node under the pointer follows it rigidly, its
+     * descendants ride a slightly under-damped spring: they start moving the same
+     * frame the parent does, trail by a few pixels while the pointer is fast, give
+     * one small settle-set wobble on release, and never separate enough to read as
+     * a broken tree (the lag is capped). All entries share the same target, so the
+     * subtree keeps its shape — lively, not scattered.
+     */
+    const FOLLOW_OMEGA = 58; // rad/s: how quickly a child catches its parent
+    const FOLLOW_ZETA = 0.78; // <1 -> one small overshoot on release
+    const FOLLOW_MAX_LAG = 26; // world px: hard ceiling on the trail
+
+    /** Direct children (then their children) of one node, in layout order. */
+    function subtreeIds(layout, rootId) {
+      const out = [];
+      const walk = (id) => {
+        const node = layout.byId.get(id);
+        if (!node) return;
+        for (const childId of node.childIds) {
+          if (out.indexOf(childId) >= 0) continue;
+          out.push(childId);
+          walk(childId);
+        }
+      };
+      walk(rootId);
+      return out;
+    }
+
+    /** Advance one spring frame; returns true while anything still visibly moves. */
+    function stepFollow(spring, dt) {
+      const targetX = spring.target.dx;
+      const targetY = spring.target.dy;
+      const omega = FOLLOW_OMEGA;
+      const zeta = FOLLOW_ZETA;
+      const omegaD = omega * Math.sqrt(1 - zeta * zeta);
+      const decay = Math.exp(-zeta * omega * dt);
+      const cos = Math.cos(omegaD * dt);
+      const sin = Math.sin(omegaD * dt);
+      let moving = false;
+      for (const entry of spring.entries) {
+        const toX = entry.baseDx + targetX;
+        const toY = entry.baseDy + targetY;
+        const x = entry.dx - toX;
+        const y = entry.dy - toY;
+        let nextX = decay * (x * cos + ((entry.vx + zeta * omega * x) / omegaD) * sin);
+        let nextY = decay * (y * cos + ((entry.vy + zeta * omega * y) / omegaD) * sin);
+        const nextVx = decay * (entry.vx * cos - ((zeta * omega * entry.vx + omega * omega * x) / omegaD) * sin);
+        const nextVy = decay * (entry.vy * cos - ((zeta * omega * entry.vy + omega * omega * y) / omegaD) * sin);
+        const lag = Math.sqrt(nextX * nextX + nextY * nextY);
+        if (lag > FOLLOW_MAX_LAG) {
+          const squeeze = FOLLOW_MAX_LAG / lag;
+          nextX *= squeeze;
+          nextY *= squeeze;
+        }
+        entry.dx = toX + nextX;
+        entry.dy = toY + nextY;
+        entry.vx = nextVx;
+        entry.vy = nextVy;
+        if (Math.abs(nextX) > 0.2 || Math.abs(nextY) > 0.2 || Math.abs(nextVx) > 8 || Math.abs(nextVy) > 8) moving = true;
+      }
+      return moving;
+    }
+
     function CanvasNode(props) {
       const { node, model, t, now, selected, onSelect, onOpen } = props;
       const view = node.view;
@@ -1599,6 +1744,84 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
 
       const [draggingNode, setDraggingNode] = React.useState(false);
       const dragRef = React.useRef(null);
+      const springRef = React.useRef(null);
+      const reducedMotion = React.useMemo(() => {
+        try {
+          return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        } catch {
+          return false;
+        }
+      }, []);
+
+      /** Write the dragged node + its followers into the offset map (one paint). */
+      const paintFollow = (spring) => {
+        setOverrides((previous) => {
+          const next = { ...previous };
+          next[spring.draggedId] = { dx: spring.draggedBase.dx + spring.target.dx, dy: spring.draggedBase.dy + spring.target.dy };
+          for (const entry of spring.entries) next[entry.id] = { dx: entry.dx, dy: entry.dy };
+          return next;
+        });
+      };
+
+      /** Rigid fallback for reduced motion (or a host without rAF). */
+      const paintRigid = (spring) => {
+        setOverrides((previous) => {
+          const next = { ...previous };
+          next[spring.draggedId] = { dx: spring.draggedBase.dx + spring.target.dx, dy: spring.draggedBase.dy + spring.target.dy };
+          for (const entry of spring.entries) {
+            next[entry.id] = { dx: entry.baseDx + spring.target.dx, dy: entry.baseDy + spring.target.dy };
+            entry.dx = next[entry.id].dx;
+            entry.dy = next[entry.id].dy;
+            entry.vx = 0;
+            entry.vy = 0;
+          }
+          return next;
+        });
+      };
+
+      /** Run the follow springs until the subtree settles (also after release). */
+      const runFollow = () => {
+        const spring = springRef.current;
+        if (!spring) return;
+        const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : null;
+        if (!raf) {
+          paintRigid(spring);
+          springRef.current = null;
+          return;
+        }
+        if (spring.frame) return;
+        const step = (time) => {
+          spring.frame = 0;
+          const current = springRef.current;
+          if (!current) return;
+          const dt = current.last > 0 ? Math.min(0.05, Math.max(0.004, (time - current.last) / 1000)) : 1 / 60;
+          current.last = time;
+          const moving = stepFollow(current, dt);
+          paintFollow(current);
+          if (current.dragging || moving) {
+            current.frame = raf(step);
+            return;
+          }
+          for (const entry of current.entries) {
+            entry.dx = entry.baseDx + current.target.dx;
+            entry.dy = entry.baseDy + current.target.dy;
+            entry.vx = 0;
+            entry.vy = 0;
+          }
+          paintFollow(current);
+          springRef.current = null;
+        };
+        spring.frame = raf(step);
+      };
+
+      React.useEffect(
+        () => () => {
+          const spring = springRef.current;
+          if (spring && spring.frame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(spring.frame);
+          springRef.current = null;
+        },
+        [],
+      );
 
       const onPointerDown = (event) => {
         if (event.button !== 0) return;
@@ -1609,6 +1832,13 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           if (!id) return;
           const base = overridesRef.current[id] || { dx: 0, dy: 0 };
           touchedRef.current = true;
+          // The subtree follows this drag; snapshot each follower's own offset so a
+          // node that was dragged earlier keeps its manual position as the base.
+          const entries = subtreeIds(layout, id).map((childId) => {
+            const offset = overridesRef.current[childId] || { dx: 0, dy: 0 };
+            return { id: childId, baseDx: offset.dx, baseDy: offset.dy, dx: offset.dx, dy: offset.dy, vx: 0, vy: 0 };
+          });
+          springRef.current = { draggedId: id, draggedBase: base, entries, target: { dx: 0, dy: 0 }, dragging: true, last: 0, frame: 0 };
           dragRef.current = { mode: 'node', id, x: event.clientX, y: event.clientY, base, moved: false };
           setDraggingNode(true);
           try {
@@ -1635,10 +1865,16 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           return;
         }
         const scale = cameraRef.current.k || 1;
-        const dx = drag.base.dx + (event.clientX - drag.x) / scale;
-        const dy = drag.base.dy + (event.clientY - drag.y) / scale;
-        if (!drag.moved && Math.abs(dx - drag.base.dx) + Math.abs(dy - drag.base.dy) > 2) drag.moved = true;
-        setOverrides((previous) => ({ ...previous, [drag.id]: { dx, dy } }));
+        const delta = { dx: (event.clientX - drag.x) / scale, dy: (event.clientY - drag.y) / scale };
+        if (!drag.moved && Math.abs(delta.dx) + Math.abs(delta.dy) > 2) drag.moved = true;
+        const spring = springRef.current;
+        if (!spring) {
+          setOverrides((previous) => ({ ...previous, [drag.id]: { dx: drag.base.dx + delta.dx, dy: drag.base.dy + delta.dy } }));
+          return;
+        }
+        spring.target = delta;
+        if (reducedMotion) paintRigid(spring);
+        else runFollow();
       };
       const endDrag = (event) => {
         const drag = dragRef.current;
@@ -1647,6 +1883,17 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         if (drag.mode === 'pan') setPanning(false);
         else {
           setDraggingNode(false);
+          const spring = springRef.current;
+          if (spring) {
+            spring.dragging = false;
+            if (reducedMotion) {
+              paintRigid(spring);
+              springRef.current = null;
+            } else {
+              // let the followers settle onto the final position, then stop
+              runFollow();
+            }
+          }
           if (!drag.moved) onSelect(drag.id);
         }
         try {
@@ -1938,6 +2185,19 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       const children = orderedChildren(view);
       const goalPhase = goal && goal.goal && typeof goal.goal.phase === 'string' ? goal.goal.phase : undefined;
       const output = outputOf(values);
+      // Handed-off deliverables lead the file zone; write/edit helper scripts stay below.
+      const outputFiles = [];
+      const seenFiles = new Set();
+      for (const item of (output && output.deliverables) || []) {
+        if (seenFiles.has(item.path)) continue;
+        seenFiles.add(item.path);
+        outputFiles.push({ path: item.path, description: item.description, delivered: true });
+      }
+      for (const file of (output && output.files) || []) {
+        if (seenFiles.has(file)) continue;
+        seenFiles.add(file);
+        outputFiles.push({ path: file, description: '', delivered: false });
+      }
       return h(
         'aside',
         { className: 'mc-drawer', role: 'dialog', 'aria-label': view.title },
@@ -2111,21 +2371,24 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                     h(
                       'span',
                       { className: 'mc-zoneTitle' },
-                      output.files.length > 0
-                        ? `${t('drawer.files')} · ${output.files.length} ${t('drawer.paths')}${output.fileCount > output.files.length ? ` · ${output.fileCount} ${t('drawer.writes')}` : ''}`
-                        : t('drawer.files'),
+                      outputFiles.length === 0
+                        ? t('drawer.files')
+                        : `${t('drawer.files')} · ${outputFiles.length} ${t('drawer.paths')}` +
+                          (output.deliverables.length > 0 ? ` · ${output.deliverables.length} ${t('drawer.deliverables')}` : '') +
+                          (output.fileCount > output.files.length ? ` · ${output.fileCount} ${t('drawer.writes')}` : ''),
                     ),
-                    output.files.length > 0
+                    outputFiles.length > 0
                       ? h(
                           'ul',
                           { className: 'mc-list' },
-                          output.files.map((file) =>
-                            h(
+                          outputFiles.map((entry) => {
+                            const file = entry.path;
+                            return h(
                               'li',
                               {
-                                className: 'mc-item mc-itemLink',
+                                className: 'mc-item mc-itemLink mc-fileRow',
                                 key: file,
-                                title: `${file}\n${t('delivery.dropHint')}`,
+                                title: `${entry.description ? `${entry.description}\n` : ''}${file}\n${t('delivery.dropHint')}`,
                                 draggable: true,
                                 onDragStart: (event) => {
                                   draggedFilePath = file;
@@ -2145,9 +2408,10 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                               },
                               h('span', { className: 'mc-itemDot', 'data-status': 'completed' }),
                               h('span', { className: 'mc-itemText' }, shortPath(file, 2)),
-                              h('span', { className: 'mc-itemMeta' }, baseName(file)),
-                            ),
-                          ),
+                              entry.delivered ? h('span', { className: 'mc-chip', 'data-tone': 'run' }, t('drawer.deliverableChip')) : null,
+                              h('span', { className: 'mc-itemMeta' }, entry.delivered && entry.description ? entry.description : baseName(file)),
+                            );
+                          }),
                         )
                       : h('span', null, t('drawer.noFiles')),
                   ),
@@ -2274,32 +2538,61 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
     }
 
     function FilePreview(props) {
-      const { file, sessionId, t, onClose, readTextFile, openPath, fileBytesUrl } = props;
+      const { file, sessionId, t, onClose, readTextFile, readBytes, openPath } = props;
       const kind = fileKind(file);
-      const [state, setState] = React.useState({ status: kind === 'image' ? 'image' : kind === 'text' ? 'loading' : 'other', text: '', lines: 0, eof: true, error: '' });
+      const [state, setState] = React.useState({
+        status: kind === 'image' ? 'loading' : kind === 'text' ? 'loading' : 'other',
+        text: '',
+        lines: 0,
+        eof: true,
+        error: '',
+        url: '',
+      });
 
       React.useEffect(() => {
         let alive = true;
-        setState((previous) => ({ ...previous, status: kind === 'image' ? 'image' : kind === 'text' ? 'loading' : 'other', error: '' }));
-        if (kind !== 'text' || typeof readTextFile !== 'function') return () => { alive = false; };
-        Promise.resolve()
-          .then(() => readTextFile(sessionId, file))
-          .then((page) => {
-            if (!alive) return;
-            const text = page && typeof page.text === 'string' ? page.text : '';
-            setState({ status: 'text', text, lines: Array.isArray(page && page.lines) ? page.lines.length : text.split('\n').length, eof: page ? page.eof !== false : true, error: '' });
-          })
-          .catch((error) => {
-            if (!alive) return;
-            setState({ status: 'error', text: '', lines: 0, eof: true, error: error && error.message ? error.message : String(error) });
-          });
+        let created = '';
+        setState((previous) => ({ ...previous, status: kind === 'text' || kind === 'image' ? 'loading' : 'other', error: '', url: '' }));
+        if (kind === 'text' && typeof readTextFile === 'function') {
+          Promise.resolve()
+            .then(() => readTextFile(sessionId, file))
+            .then((page) => {
+              if (!alive) return;
+              const text = page && typeof page.text === 'string' ? page.text : '';
+              setState({ status: 'text', text, lines: Array.isArray(page && page.lines) ? page.lines.length : text.split('\n').length, eof: page ? page.eof !== false : true, error: '', url: '' });
+            })
+            .catch((error) => {
+              if (!alive) return;
+              setState({ status: 'error', text: '', lines: 0, eof: true, error: fileErrorText(error, t), url: '' });
+            });
+        } else if (kind === 'image' && typeof readBytes === 'function') {
+          Promise.resolve()
+            .then(() => readBytes(sessionId, file))
+            .then((payload) => {
+              if (!alive) return;
+              const bytes = bytesOf(payload && payload.data !== undefined ? payload.data : payload);
+              if (!bytes) throw new Error('empty image payload');
+              const blob = new Blob([bytes], { type: mediaType(file) });
+              created = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(blob) : '';
+              setState({ status: 'image', text: '', lines: 0, eof: true, error: '', url: created });
+            })
+            .catch((error) => {
+              if (!alive) return;
+              setState({ status: 'error', text: '', lines: 0, eof: true, error: fileErrorText(error, t), url: '' });
+            });
+        }
         return () => {
           alive = false;
+          if (created && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(created);
         };
-      }, [file, sessionId, kind, readTextFile]);
+      }, [file, sessionId, kind, readTextFile, readBytes]);
 
       const body = (() => {
-        if (state.status === 'image') return h('img', { className: 'mc-previewImage', src: typeof fileBytesUrl === 'function' ? fileBytesUrl(file) : '', alt: baseName(file) });
+        if (state.status === 'image') {
+          return state.url
+            ? h('img', { className: 'mc-previewImage', src: state.url, alt: baseName(file) })
+            : h('div', { className: 'mc-previewNote' }, `${t('drawer.previewError')}: ${t('drawer.noImageBytes')}`);
+        }
         if (state.status === 'text') {
           return h(
             React.Fragment,
@@ -2329,7 +2622,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
               onClick: () => {
                 if (typeof openPath === 'function') {
                   Promise.resolve()
-                    .then(() => openPath(file))
+                    .then(() => openPath(file, sessionId))
                     .catch((error) => setState((previous) => ({ ...previous, status: 'error', error: error && error.message ? error.message : String(error) })));
                 }
               },
@@ -2786,8 +3079,8 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
               t,
               onClose: () => setPreviewFile(null),
               readTextFile: props.readTextFile,
+              readBytes: props.readBytes,
               openPath: props.openPath,
-              fileBytesUrl: props.fileBytesUrl,
             })
           : null,
         h(
@@ -2817,13 +3110,22 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       );
       const t = ctx.locale.bind(NS);
 
-      // Optional remotes: file reads and native open. Absent services only cost the
-      // preview's "open on desktop" button, never the panel.
-      let remotes;
-      ctx.inject(['remote'], (scope) => {
-        remotes = scope.remote;
+      // Optional remotes: file reads and native open. Each generated Remote
+      // namespace is gated on its own dependency (`remote` alone only exposes the
+      // transport), so declare the two faces we read; a missing one only costs the
+      // preview / "open on desktop" button, never the panel.
+      let workspaceFiles;
+      ctx.inject(['remote.workspaceFiles'], (scope) => {
+        workspaceFiles = scope.remote.workspaceFiles;
         return () => {
-          remotes = undefined;
+          workspaceFiles = undefined;
+        };
+      });
+      let sessionRemote;
+      ctx.inject(['remote.session'], (scope) => {
+        sessionRemote = scope.remote.session;
+        return () => {
+          sessionRemote = undefined;
         };
       });
 
@@ -2846,17 +3148,35 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         },
         refreshProjections: (id) => ctx.sessions.refreshProjections(id),
         readTextFile: async (sessionId, path) => {
-          const files = remotes && remotes.workspaceFiles;
+          const files = workspaceFiles;
           if (!files || typeof files.read !== 'function') throw new Error('workspace-files remote unavailable');
-          const page = await files.read(sessionId, path, { offset: 1, limit: 400 }, undefined);
-          return page;
+          return remoteValue(await files.read(sessionId, path, { offset: 1, limit: 400 }, undefined));
         },
-        openPath: async (path) => {
-          const session = remotes && remotes.session;
+        readBytes: async (sessionId, path) => {
+          const files = workspaceFiles;
+          if (!files || typeof files.readBytes !== 'function') throw new Error('workspace-files remote unavailable');
+          return remoteValue(await files.readBytes(sessionId, path, {}, undefined));
+        },
+        /**
+         * Open on the desktop. The Host resolves the path against its own cwd, so a
+         * workspace-relative path must be made absolute first (`stat` reports the
+         * canonical Host path, symlinks resolved).
+         */
+        openPath: async (path, sessionId) => {
+          const session = sessionRemote;
           if (!session || typeof session.openWorkspacePath !== 'function') throw new Error('native open unavailable');
-          await session.openWorkspacePath({ path });
+          let target = path;
+          const files = workspaceFiles;
+          if (files && typeof files.stat === 'function' && sessionId) {
+            try {
+              const info = remoteValue(await files.stat(sessionId, path, undefined));
+              if (info && typeof info.absolutePath === 'string' && info.absolutePath !== '') target = info.absolutePath;
+            } catch {
+              /* keep the path we were given and let the Host decide */
+            }
+          }
+          await session.openWorkspacePath({ path: target });
         },
-        fileBytesUrl: (path) => `api/file?path=${encodeURIComponent(path)}`,
         deliverToSession: async (sessionId, text) => {
           const sessions = ctx.sessions;
           if (!sessions || typeof sessions.using !== 'function') throw new Error('sessions service unavailable');

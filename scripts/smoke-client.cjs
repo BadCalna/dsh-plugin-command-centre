@@ -75,10 +75,33 @@ const windowStub = {
   },
 };
 
-const sandbox = { window: windowStub, console, Date, Math, JSON, Set, Map, Object, String, Number, Array, Promise, Symbol };
+// One frame queue so the canvas' subtree-drag springs can be stepped by hand.
+const frames = [];
+const sandbox = {
+  window: windowStub,
+  console, Date, Math, JSON, Set, Map, Object, String, Number, Array, Promise, Symbol,
+  requestAnimationFrame: (callback) => {
+    frames.push(callback);
+    return frames.length;
+  },
+  cancelAnimationFrame: () => {},
+};
 sandbox.globalThis = sandbox;
 require('vm').createContext(sandbox);
 require('vm').runInContext(source, sandbox, { filename: 'client.js' });
+
+/** Run queued animation frames at a steady 16ms until nothing is scheduled. */
+function flushFrames(limit = 300) {
+  let elapsed = 0;
+  let count = 0;
+  while (frames.length > 0 && count < limit) {
+    const batch = frames.splice(0, frames.length);
+    elapsed += 16;
+    for (const callback of batch) callback(elapsed);
+    count += 1;
+  }
+  return count;
+}
 
 const fakeEvent = { stopPropagation() {}, preventDefault() {} };
 
@@ -107,6 +130,8 @@ let dictionaries = null;
 const delivered = [];
 const panelSelections = [];
 const registeredShortcuts = [];
+const openedPaths = [];
+const injectedDeps = [];
 const ctx = {
   effect(fn) {
     const disposer = fn();
@@ -133,13 +158,27 @@ const ctx = {
     },
   },
   sessions: { refreshProjections: () => Promise.resolve() },
-  inject: (_deps, callback) =>
-    callback({
+  inject: (deps, callback) => {
+    injectedDeps.push(Array.isArray(deps) ? deps.join(',') : String(deps));
+    return callback({
       remote: {
-        workspaceFiles: { read: async () => ({ text: 'preview', lines: ['preview'], eof: true }) },
-        session: { openWorkspacePath: async () => ({ opened: true }) },
+        workspaceFiles: {
+          read: async (_sessionId, path) =>
+            path.includes('missing')
+              ? { ok: false, error: { code: 'FS_NOT_FOUND', message: 'FS_NOT_FOUND' } }
+              : { ok: true, value: { text: 'preview', lines: ['preview'], eof: true } },
+          readBytes: async () => ({ ok: true, value: { data: [137, 80, 78, 71], eof: true } }),
+          stat: async (_sessionId, path) => ({ ok: true, value: { absolutePath: `/abs${path.startsWith('/') ? path : `/${path}`}` } }),
+        },
+        session: {
+          openWorkspacePath: async (request) => {
+            openedPaths.push(request.path);
+            return { ok: true, value: { opened: true } };
+          },
+        },
       },
-    }),
+    });
+  },
   layout: {
     panelInfo: { getSnapshot: () => ({ activePanelId: null }) },
     selectPanel: (id) => panelSelections.push(id),
@@ -156,6 +195,8 @@ const ctx = {
 plugin.apply(ctx);
 
 assert(injectedSlots.includes('main'), 'main slot injected');
+assert(injectedDeps.includes('remote.workspaceFiles'), 'the workspace-files Remote namespace is declared (not just remote)');
+assert(injectedDeps.includes('remote.session'), 'the session Remote namespace is declared for open-on-desktop');
 assert(injectedSlots.includes('sidebar.panellist'), 'sidebar.panellist slot injected');
 assert(dictionaries && dictionaries.ns === 'missionControl', 'locale dictionary registered');
 assert(dictionaries.dicts.zh && dictionaries.dicts.en, 'zh + en dictionaries present');
@@ -276,6 +317,16 @@ const projection = {
     },
   },
   b: {
+    missionControl: {
+      text: '第 7 页改成进度条版，已交付 pptx',
+      tool: 'present',
+      toolError: '',
+      turn: 4,
+      reason: 'completed',
+      files: ['/w/build_deck.mjs'],
+      fileCount: 1,
+      deliverables: [{ path: '/w/输出/2026Q4_西二区_1023v3.pptx', description: '第 7 页改成 Q1—Q4 进度条' }],
+    },
     goal: { goal: { objective: '重构支付模块', phase: 'active' }, roundsStarted: 2 },
     agentTeam: {
       members: [{ id: 'b', name: 'lead', role: 'lead', phase: 'active' }],
@@ -520,6 +571,17 @@ dropTree = expandPanel();
 assert(countClass(dropTree, 'mc-delivery') === 1, 'delivery overlay stays open while sending');
 assert(render(dropTree).includes('读取中'), 'delivery shows a sending state');
 
+// ---- handed-off deliverables (Host projection v2) ----
+const deliveredCard = findFirst(expandPanel(), (node) => node.type === 'div' && node.props && node.props.className === 'mc-card' && nodeText(node).includes('重构支付模块'));
+assert(deliveredCard, 'card with a handed-off deliverable rendered');
+assert(nodeText(deliveredCard).includes('OUT 1D'), 'output code counts deliverables as D, not F');
+deliveredCard.props.onClick(fakeEvent);
+const deliveredDrawer = render(expandPanel());
+assert(deliveredDrawer.includes('1023v3.pptx'), 'the handed-off pptx is listed in the file zone');
+assert(deliveredDrawer.includes('交付'), 'the deliverable row is tagged');
+assert(deliveredDrawer.includes('build_deck.mjs'), 'write/edit helper scripts stay listed too');
+assert(deliveredDrawer.includes('第 7 页改成 Q1—Q4 进度条'), 'the agent description is surfaced');
+
 // ---- canvas view ----
 function expandPanel() {
   resetHooks();
@@ -638,15 +700,41 @@ const pointerEvent = (overrides) => Object.assign({
   target: { closest: (selector) => (selector === '.mc-node' ? { getAttribute: () => 'a' } : null) },
 }, overrides || {});
 
+function nodeLeftOf(currentTree, id) {
+  let left;
+  const walk = (node) => {
+    if (!node || typeof node !== 'object' || left !== undefined) return;
+    if (Array.isArray(node)) { for (const child of node) walk(child); return; }
+    if (node.props && node.props.className === 'mc-node' && node.props['data-node-id'] === id) left = node.props.style.left;
+    for (const child of node.children || []) walk(child);
+  };
+  walk(currentTree);
+  return left;
+}
+
 const before = nodeLeft(tree, 'a');
+const beforeKids = { a1: nodeLeftOf(tree, 'a1'), a2: nodeLeftOf(tree, 'a2') };
+const gapBefore = { a1: beforeKids.a1 - before, a2: beforeKids.a2 - before };
 const canvas = canvasElement(tree);
 assert(canvas, 'canvas element exposes pointer handlers');
 canvas.props.onPointerDown(pointerEvent());
 canvas.props.onPointerMove(pointerEvent({ clientX: 140 }));
-canvas.props.onPointerUp(pointerEvent({ clientX: 140 }));
+flushFrames(1);
+tree = expandPanel();
+const oneFrame = nodeLeft(tree, 'a');
+const oneFrameKids = { a1: nodeLeftOf(tree, 'a1'), a2: nodeLeftOf(tree, 'a2') };
+assert(Number.isFinite(oneFrame) && oneFrame > before, `dragging a node moves it (${before} -> ${oneFrame})`);
+assert(oneFrameKids.a1 > beforeKids.a1 && oneFrameKids.a2 > beforeKids.a2, 'children start following in the same frame');
+assert(oneFrameKids.a1 - oneFrame < gapBefore.a1 && oneFrameKids.a2 - oneFrame < gapBefore.a2, 'children trail the parent by a few pixels (spring, not a rigid snap)');
+canvas.props.onPointerMove(pointerEvent({ clientX: 180 }));
+canvas.props.onPointerUp(pointerEvent({ clientX: 180 }));
+flushFrames();
 tree = expandPanel();
 const after = nodeLeft(tree, 'a');
-assert(Number.isFinite(before) && Number.isFinite(after) && after > before, `dragging a node moves it (${before} -> ${after})`);
+const afterKids = { a1: nodeLeftOf(tree, 'a1'), a2: nodeLeftOf(tree, 'a2') };
+assert(Number.isFinite(after) && Math.abs(after - (before + 80)) < 0.5, `drag settles on the pointer delta (${before} -> ${after})`);
+assert(Math.abs(afterKids.a1 - beforeKids.a1 - 80) < 0.6 && Math.abs(afterKids.a2 - beforeKids.a2 - 80) < 0.6, `children settle with the parent, shape intact (a1 ${beforeKids.a1} -> ${afterKids.a1}, a2 ${beforeKids.a2} -> ${afterKids.a2})`);
+assert(frames.length === 0, 'the follow springs stop once the subtree settles');
 
 const dragCanvas = canvasElement(tree);
 dragCanvas.props.onPointerDown(pointerEvent({ clientX: 200, clientY: 200 }));
@@ -654,8 +742,29 @@ dragCanvas.props.onPointerUp(pointerEvent({ clientX: 200, clientY: 200 }));
 tree = expandPanel();
 assert(countClass(tree, 'mc-drawer') === 1, 'a click without movement still selects the node');
 
-console.log('SMOKE OK');
-console.log(`registered slots: ${registered.map((r) => `${r.options.name}:${r.options.key || r.options.id}`).join(', ')}`);
+// The preview reads through a promise: settle it before the last assertions.
+(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // Preview remotes: unwrap the RemoteResult envelope, error codes surface, and
+  // "open on desktop" resolves the workspace-relative path through stat first.
+  const pageProps = main.options.inject();
+  const page = await pageProps.readTextFile('a', 'notes/migrate.log');
+  assert(page && page.text === 'preview', 'readTextFile unwraps the RemoteResult envelope');
+  const bytes = await pageProps.readBytes('a', '输出/pic.png');
+  assert(bytes && Array.isArray(bytes.data) && bytes.data.length === 4, 'readBytes unwraps the RemoteResult envelope');
+  let readError = null;
+  try {
+    await pageProps.readTextFile('a', 'missing.md');
+  } catch (error) {
+    readError = error;
+  }
+  assert(readError && /FS_NOT_FOUND/.test(String(readError.message || readError.code)), 'a failed read surfaces the host error code');
+  await pageProps.openPath('notes/migrate.log', 'a');
+  assert(openedPaths.length === 1 && openedPaths[0] === '/abs/notes/migrate.log', `openPath sends the absolute host path from stat (got ${JSON.stringify(openedPaths)})`);
+
+  console.log('SMOKE OK');
+  console.log(`registered slots: ${registered.map((r) => `${r.options.name}:${r.options.key || r.options.id}`).join(', ')}`);
 console.log(`render length: ${html.length} chars; drawer length: ${drawerText.length} chars`);
 
 // Print a plain-text projection of the rendered page for a quick content review.
@@ -696,6 +805,10 @@ if (process.env.MC_DUMP) {
   console.log(JSON.stringify({ nodes: collect(tree, 'mc-node', []), edges: collect(tree, 'mc-edge', []).length }, null, 1));
   console.log('--- CANVAS TEXT ---');
   console.log(canvasTextDump.slice(0, 60).join('\n'));
-  console.log('--- DRAWER TEXT ---');
-  console.log(drawerLines.join('\n'));
-}
+    console.log('--- DRAWER TEXT ---');
+    console.log(drawerLines.join('\n'));
+  }
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

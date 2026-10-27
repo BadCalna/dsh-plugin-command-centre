@@ -3,8 +3,11 @@
  *
  * Two jobs only (V1b):
  *   1. one small session projection `missionControl` — last assistant text,
- *      last tool, turn outcome and the files a turn wrote; folded from the
- *      session log so the Client never replays history;
+ *      last tool, turn outcome, the files a turn wrote with write/edit, and the
+ *      deliverables the agent handed over (`deliverables/presented`); folded from
+ *      the session log so the Client never replays history. Deliverables matter
+ *      because shell-built artifacts (.pptx/.xlsx rendered by a bash script) never
+ *      pass through write/edit and would otherwise be invisible;
  *   2. one authenticated same-origin route so the Client can keep the canvas
  *      layout across restarts (the Web UI origin changes per launch, so a
  *      localStorage key alone cannot survive a restart).
@@ -23,6 +26,9 @@ const PREFS_ROUTE = '/api/command-centre.prefs';
 const PREFS_LIMIT = 16 * 1024;
 const TEXT_LIMIT = 200;
 const FILE_LIMIT = 5;
+const DELIVERY_LIMIT = 4;
+const DELIVERY_PATH_LIMIT = 320;
+const DELIVERY_DESC_LIMIT = 80;
 const WRITE_TOOLS = new Set(['write', 'edit']);
 const FAILED_KINDS = new Set(['error', 'blocked', 'max-tokens']);
 
@@ -31,7 +37,7 @@ const passthroughSchema = { parse: (value) => value, safeParse: (value) => ({ su
 
 /** Empty projection state; every field stays JSON-serializable and small. */
 function emptyState() {
-  return { text: '', tool: '', toolError: '', turn: 0, reason: '', files: [], fileCount: 0 };
+  return { text: '', tool: '', toolError: '', turn: 0, reason: '', files: [], fileCount: 0, deliverables: [] };
 }
 
 function truncate(value, limit) {
@@ -87,6 +93,22 @@ function applyEvent(state, event) {
         fileCount: state.fileCount + 1,
       };
     }
+    case 'deliverables/presented': {
+      // The present tool logs the files an agent hands over — including artifacts a
+      // shell command created — with an absolute path and a short description.
+      const entries = event.data && Array.isArray(event.data.files) ? event.data.files : [];
+      let deliverables = state.deliverables;
+      let changed = false;
+      for (const entry of entries) {
+        if (!entry || typeof entry.path !== 'string' || entry.path === '') continue;
+        const path = truncate(entry.path, DELIVERY_PATH_LIMIT);
+        deliverables = deliverables.filter((item) => item.path !== path);
+        deliverables.push({ path, description: truncate(entry.description || '', DELIVERY_DESC_LIMIT) });
+        changed = true;
+      }
+      if (!changed) return state;
+      return { ...state, deliverables: deliverables.slice(-DELIVERY_LIMIT) };
+    }
     case 'tool/result': {
       const error = event.data && event.data.error;
       const next = error ? truncate(error.code || error.name || 'error', 80) : '';
@@ -107,10 +129,11 @@ function applyEvent(state, event) {
   }
 }
 
-const definition = {
+/** Exported for the offline Host smoke test; the loader only needs `apply`/`inject`. */
+export const definition = {
   key: 'missionControl',
   stateSchema: passthroughSchema,
-  stateVersion: 1,
+  stateVersion: 2,
   init: () => emptyState(),
   apply: applyEvent,
   wire: {

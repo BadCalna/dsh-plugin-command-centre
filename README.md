@@ -34,13 +34,17 @@
 
 - **看板（默认）**：`需要你` / `运行中` / `空闲` 三列，列头带 `CH-0N` 编号与计数；按 `v` 切到矩阵视图
 - **卡片**：状态点、标题、工作区、`AGENTS 主+2子`（含活跃数）、`CTX 62%`、todo 分段进度、最后活动、
-  **产出码**（`OUT 2F` = 写了 2 个文件 / `TXT` = 有回答 / `ERR` = 出错，悬停看内容）
+  **产出码**（`OUT 1D` = 交付了 1 个交付物 / `OUT 2F` = 写了 2 个文件 / `TXT` = 有回答 / `ERR` = 出错，悬停看内容）
 - **四个看板列**：需要你 / 运行中 / **失败** / 空闲；失败来自宿主的 `turn/end.reason`
   （`error` / `blocked` / `max-tokens`）
 - **subagent**：卡片内嵌第一层子 agent（`−N` 收起 / `+N` 展开 / 更深层显示 `+N` 计数）
 - **需要你横幅**：审批 / 计划审核 / 提问被顶到最上方，处理完自动消失
-- **详情抽屉**：概览 / 目标（goal）/ 团队 / todo 全量 / 子任务 / **产出区（文件区 + 对话区，真实数据）**；
-  点产出里的文件 → 面板内**文件预览**（文本/代码按行读、图片按字节流、其他类型给「在桌面打开」）
+- **详情抽屉**：概览 / 目标（goal）/ 团队 / todo 全量 / 子任务 / **产出区（交付物 + 文件区 + 对话区，真实数据）**；
+  **交付物**来自会话日志的 `deliverables/presented`（agent 用 `present` 交出来的文件），所以**脚本生成**的
+  pptx/xlsx/png 也算产出，不再只看 `write`/`edit`；写的脚本/中间文件仍列在下面；
+  点文件 → 面板内**文件预览**（文本/代码按行读、图片走 `remote.workspaceFiles.readBytes` 转 blob，其他类型给「在桌面打开」）；
+  预览走 `remote.workspaceFiles` / `remote.session` 两个命名空间（`ctx.inject` 必须声明 `remote.<ns>`，只声明 `remote` 会在运行时报 `without inject`），
+  结果按 `{ ok, value }` 信封解包，「在桌面打开」先把相对路径经 `stat.absolutePath` 绝对化
 - **设置（⚙）**：默认界面（看板 / 矩阵 / 画布）、安静模式默认开、是否记住上次界面
 - **节点间投递**：把抽屉「产出 · 文件区」里的文件**拖到看板卡片或画布节点**上 → 确认框 →
   以 `queue` 模式向目标会话投一条带文件路径的用户消息（不会打断正在跑的回合）；
@@ -50,7 +54,9 @@
 - **快捷键**：`⌘⇧P`（Windows / Linux 为 `Ctrl+Shift+P`）打开 / 返回面板；可在 **设置 → 快捷键** 改键
 - **节点式画布**：`v` 切到「画布」，任务变成节点、父子关系连线，单子节点不换行；
   默认 **纵（上→下）+ 直角连线**；左上角可切方向（横/纵）、连线（曲线/直角）；
-  **节点可拖**（连线跟随，`↺` 重置），空白处拖拽平移、**滚轮直接缩放**、Shift+滚轮平移、`0` 适配全图；
+  **节点可拖**（拖动一个节点时它的整棵子树一起走，连线跟随，`↺` 重置）；子节点挂在**弹簧**上跟随，
+  起步同帧、快速拖动时轻微拖尾、松手收一下再落定（拖尾上限 26px，不会散架；`prefers-reduced-motion` 下改为刚性平移）；
+  空白处拖拽平移、**滚轮直接缩放**、Shift+滚轮平移、`0` 适配全图；
   只画节点和连线：不再套「根子树」分组框和重复标题（标题就在节点里，从属关系看连线 + `主/子` 标记）；
   连线加粗并带主题强调色，选中节点的上下游连线会高亮发光；
   从看板卡片右上角 `⌗` 进入会自动 fit 到该任务的子树。子树范围按**当前选中节点**往下取；
@@ -130,6 +136,7 @@ link:/absolute/path/to/dsh-plugin-command-centre
 | token 数 | 投影 `tokenUsage` |
 | 子 agent 目录 / 时长 | 投影 `subagentCatalog` / `subagentTiming` |
 | 目标 / 团队 | 投影 `goal` / `agentTeam` |
+| 交付物（脚本生成也算） | Host 投影 `missionControl.deliverables`，fold 会话日志的 `deliverables/presented` |
 
 冷会话投影用 `ctx.sessions.refreshProjections(id)` 拉一次（不 retain、不开流）。
 
@@ -149,7 +156,9 @@ docs/                # 设计调研、视觉规范、状态记录
 
 ```bash
 node --check client.js
-node scripts/smoke-client.cjs
+node --check index.js
+node scripts/smoke-client.cjs   # Client：渲染树 + 交互 + 画布弹簧拖拽
+node scripts/smoke-host.mjs     # Host：missionControl 投影 fold（含 deliverables）
 ```
 
 冒烟测试覆盖：模块工厂 → `apply` 注册两个 slot（`main:mission` 与 `sidebar.panellist:mission`

@@ -1,6 +1,6 @@
 # STATUS — Command Centre
 
-> 最后更新：2026-10-27 · v0.9.0（节点间投递 + 对话区 markdown 扁平化）。
+> 最后更新：2026-10-27 · v0.9.2（画布子树拖拽 + 交付物投影 + 文件预览修复）。
 
 ## 现在是什么状态
 
@@ -28,6 +28,17 @@
     → `sessions.using(...).binding.session.prompt([{type:'text'}], 'queue')`；对话区 markdown 扁平化
   - `v0.9.1` 画布去掉「工作区」感的根子树分组框（虚线簇框 + 标题副本）：标题节点卡片里已有，
     从属关系靠连线 + `主/子` 标记；顺带解决簇框标题压住左上角布局开关、多个根时标题互压
+  - `v0.9.2` ① 画布拖节点时**整棵子树跟着走**（子节点走轻微欠阻尼弹簧：起步同帧、快速拖轻微拖尾、
+    松手收一下，拖尾上限 26px，`prefers-reduced-motion` 下降级为刚性）；
+    ② Host 投影 fold 会话日志的 `deliverables/presented`（**stateVersion 2**）→ 抽屉「交付物」，
+    **脚本（bash）生成的 pptx/xlsx/png 也能进产出区**（此前只认 write/edit，pptx 完全不可见）；
+    ③ 文件预览修好：`ctx.inject` 必须声明 `remote.workspaceFiles` / `remote.session` 命名空间
+    （之前只声明 `remote`，运行时报 `cannot get property "remote.workspaceFiles" without inject`）；
+    远程调用按 `{ ok, value }` 信封解包（之前直接读裸值 → 文本显示「—」、图片报 empty payload）；
+    图片改走 `remote.workspaceFiles.readBytes` + blob URL；「在桌面打开」先 `stat` 取 `absolutePath`
+    （Host 按自己的 cwd 解析相对路径，传相对路径会失败）；
+    ④ 新增 `scripts/smoke-host.mjs` 覆盖投影 fold；Client 冒烟补：远程命名空间注入、信封解包、
+    stat 绝对化、交付物渲染、画布子树弹簧拖拽
 
 ## 关键结论 / 踩过的坑
 
