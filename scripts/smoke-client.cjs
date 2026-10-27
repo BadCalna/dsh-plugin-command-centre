@@ -417,6 +417,12 @@ function expandPanel() {
   resetHooks();
   return expand(React.createElement(main.component, panelProps));
 }
+function nodeText(node) {
+  if (node === null || node === undefined) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join(' ');
+  return (node.children || []).map(nodeText).join(' ');
+}
 function countClass(node, className) {
   if (!node || typeof node !== 'object') return 0;
   if (Array.isArray(node)) return node.reduce((sum, child) => sum + countClass(child, className), 0);
@@ -450,11 +456,55 @@ assert(canvasFocusButton, 'canvas button still present');
 const boardButton = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === '看板');
 boardButton.props.onClick(fakeEvent);
 tree = expandPanel();
-const focusButton = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === '⌗');
+const focusCard = findFirst(tree, (node) => node.type === 'div' && node.props && node.props.className === 'mc-card' && nodeText(node).includes('修复登录超时'));
+assert(focusCard, 'running card rendered before canvas focus');
+const focusButton = findFirst(focusCard, (node) => node.type === 'button' && node.children && node.children[0] === '⌗');
 assert(focusButton, 'card exposes the canvas focus button');
 focusButton.props.onClick(fakeEvent);
 tree = expandPanel();
 assert(countClass(tree, 'mc-canvas') === 1, 'focus switches to the canvas view');
+
+// ---- canvas layout options ----
+function clickLabel(label) {
+  const button = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === label);
+  assert(button, `canvas option button "${label}" rendered`);
+  button.props.onClick(fakeEvent);
+  tree = expandPanel();
+}
+function nodeBoxes() {
+  const out = [];
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { for (const child of node) walk(child); return; }
+    if (node.props && node.props.className === 'mc-node') out.push(node.props.style);
+    for (const child of node.children || []) walk(child);
+  };
+  walk(tree);
+  return out;
+}
+
+assert(countClass(tree, 'mc-node') === 4, 'all-scope canvas draws every task');
+const boxesLr = JSON.stringify(nodeBoxes());
+clickLabel('子树');
+assert(countClass(tree, 'mc-node') === 3, 'subtree scope draws only the focused case');
+const scopedNodes = [];
+(function walkNodes(node) {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) { for (const child of node) walkNodes(child); return; }
+  if (node.props && node.props.className === 'mc-node') scopedNodes.push(nodeText(node));
+  for (const child of node.children || []) walkNodes(child);
+})(tree);
+assert(scopedNodes.some((text) => text.includes('修复登录超时')), 'subtree scope keeps the focused root');
+assert(!scopedNodes.some((text) => text.includes('重构支付模块')), 'subtree scope drops other roots');
+clickLabel('纵');
+const boxesTb = nodeBoxes();
+assert(JSON.stringify(boxesTb) !== boxesLr, 'top-to-bottom layout moves the nodes');
+assert(boxesTb.every((box) => Number.isFinite(box.left) && Number.isFinite(box.top)), 'top-to-bottom boxes are numbers');
+const tbTree = render(tree);
+assert(!/undefined|NaN|null/.test(tbTree.replace(/null/g, '')), 'top-to-bottom render has no NaN');
+clickLabel('直角');
+const orthoPath = findFirst(tree, (node) => node.type === 'path' && node.props && node.props.className === 'mc-edge');
+assert(orthoPath && /H .* V /.test(orthoPath.props.d), 'orthogonal edge path uses H/V segments');
 
 console.log('SMOKE OK');
 console.log(`registered slots: ${registered.map((r) => `${r.options.name}:${r.options.key || r.options.id}`).join(', ')}`);

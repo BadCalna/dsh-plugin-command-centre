@@ -104,6 +104,18 @@ window.__ModuleLoader__.load({
         root: '主',
         sub: '子',
         empty: '没有可画的节点',
+        lr: '横',
+        tb: '纵',
+        lrTitle: '左→右布局',
+        tbTitle: '上→下布局',
+        allScope: '全部',
+        focusScope: '子树',
+        allScopeTitle: '画所有任务',
+        focusScopeTitle: '只画当前任务的子树',
+        curve: '曲线',
+        ortho: '直角',
+        curveTitle: '贝塞尔连线',
+        orthoTitle: '直角折线',
       },
     };
     const EN = {
@@ -186,6 +198,18 @@ window.__ModuleLoader__.load({
         root: 'main',
         sub: 'sub',
         empty: 'No nodes to draw',
+        lr: 'LR',
+        tb: 'TB',
+        lrTitle: 'Left to right',
+        tbTitle: 'Top to bottom',
+        allScope: 'All',
+        focusScope: 'Subtree',
+        allScopeTitle: 'Draw every task',
+        focusScopeTitle: 'Draw the selected task subtree only',
+        curve: 'Curve',
+        ortho: 'Ortho',
+        curveTitle: 'Bezier edges',
+        orthoTitle: 'Orthogonal edges',
       },
     };
     // #endregion
@@ -686,6 +710,7 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-node[data-state=running]{box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent),0 0 0 1px color-mix(in srgb,var(--mc-run) 24%,transparent)}
 .mc-node:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:1px}
 .mc-nodeKind{flex:none;font-family:var(--mc-mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);border:1px solid var(--cc-hair);padding:0 4px;line-height:12px;border-radius:1px}
+.mc-canvasOptions{position:absolute;left:10px;top:10px;z-index:3;display:flex;gap:6px;flex-wrap:wrap}
 .mc-canvasCtl{position:absolute;right:10px;bottom:10px;z-index:3;display:flex;align-items:center;gap:3px;padding:4px 5px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 94%,transparent)}
 .mc-canvasZoom{font-family:var(--mc-mono);font-size:10px;color:var(--dsw-alias-label-tertiary);min-width:40px;text-align:center;font-variant-numeric:tabular-nums}
 .mc-canvasHint{position:absolute;left:10px;bottom:12px;z-index:3;color:var(--dsw-alias-label-tertiary);font-family:var(--mc-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;pointer-events:none}
@@ -971,29 +996,37 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
     }
 
     /**
-     * Tidy layered layout: one column per depth, leaves stacked in source order,
-     * parents centered on the first/last child. Single-child chains stay straight.
+     * Tidy layered layout. One column/row per depth, leaves stacked in source
+     * order, parents centered on the first/last child, single-child chains
+     * straight. `direction` is 'lr' (columns) or 'tb' (rows).
      */
-    function layoutForest(roots, model) {
+    function layoutForest(roots, model, direction) {
+      const horizontal = direction !== 'tb';
+      const breadthSize = horizontal ? NODE_H : NODE_W;
+      const breadthGap = horizontal ? NODE_GAP_Y : 26;
+      const depthSize = horizontal ? NODE_W : NODE_H;
+      const depthGap = horizontal ? NODE_GAP_X : 70;
       const nodes = [];
       const byId = new Map();
       let cursor = 0;
       const place = (view, depth) => {
         const kids = orderedChildren(view).map((child) => model.viewOf(child));
-        let y;
+        let slot;
         if (kids.length === 0) {
-          y = cursor;
-          cursor += NODE_H + NODE_GAP_Y;
+          slot = cursor;
+          cursor += breadthSize + breadthGap;
         } else {
           const placed = kids.map((kid) => place(kid, depth + 1));
-          y = (placed[0].y + placed[placed.length - 1].y) / 2;
+          slot = (placed[0].slot + placed[placed.length - 1].slot) / 2;
         }
+        const along = depth * (depthSize + depthGap);
         const node = {
           id: view.id,
           view,
           depth,
-          x: depth * (NODE_W + NODE_GAP_X),
-          y,
+          slot,
+          x: horizontal ? along : slot,
+          y: horizontal ? slot : along,
           w: NODE_W,
           h: NODE_H,
           childIds: kids.map((kid) => kid.id),
@@ -1015,15 +1048,12 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
           }
         };
         walk(rootNode);
-        clusters.push({
-          id: root.id,
-          title: root.title,
-          x: Math.min(...subtree.map((node) => node.x)) - CLUSTER_PAD,
-          y: Math.min(...subtree.map((node) => node.y)) - CLUSTER_PAD,
-          w: Math.max(...subtree.map((node) => node.x + node.w)) + CLUSTER_PAD - (Math.min(...subtree.map((node) => node.x)) - CLUSTER_PAD),
-          h: Math.max(...subtree.map((node) => node.y + node.h)) + CLUSTER_PAD - (Math.min(...subtree.map((node) => node.y)) - CLUSTER_PAD),
-        });
-        cursor += CLUSTER_GAP;
+        const minX = Math.min(...subtree.map((node) => node.x)) - CLUSTER_PAD;
+        const maxX = Math.max(...subtree.map((node) => node.x + node.w)) + CLUSTER_PAD;
+        const minY = Math.min(...subtree.map((node) => node.y)) - CLUSTER_PAD;
+        const maxY = Math.max(...subtree.map((node) => node.y + node.h)) + CLUSTER_PAD;
+        clusters.push({ id: root.id, title: root.title, x: minX, y: minY, w: maxX - minX, h: maxY - minY });
+        cursor += horizontal ? CLUSTER_GAP : CLUSTER_GAP;
       }
 
       const pad = 40;
@@ -1045,16 +1075,28 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
         const parentId = node.view.row && typeof node.view.row.parentId === 'string' ? node.view.row.parentId : undefined;
         const from = parentId ? byId.get(parentId) : undefined;
         if (!from) continue;
-        const sx = from.x + from.w;
-        const sy = from.y + from.h / 2;
-        const ex = node.x;
-        const ey = node.y + node.h / 2;
-        const reach = Math.max(28, (ex - sx) * 0.45);
-        edges.push({
-          id: `${from.id}->${node.id}`,
-          d: `M ${sx} ${sy} C ${sx + reach} ${sy}, ${ex - reach} ${ey}, ${ex} ${ey}`,
-          live: node.view.running,
-        });
+        let d;
+        if (horizontal) {
+          const sx = from.x + from.w;
+          const sy = from.y + from.h / 2;
+          const ex = node.x;
+          const ey = node.y + node.h / 2;
+          const reach = Math.max(28, (ex - sx) * 0.45);
+          d = `M ${sx} ${sy} C ${sx + reach} ${sy}, ${ex - reach} ${ey}, ${ex} ${ey}`;
+        } else {
+          const sx = from.x + from.w / 2;
+          const sy = from.y + from.h;
+          const ex = node.x + node.w / 2;
+          const ey = node.y;
+          const reach = Math.max(24, (ey - sy) * 0.45);
+          d = `M ${sx} ${sy} C ${sx} ${sy + reach}, ${ex} ${ey - reach}, ${ex} ${ey}`;
+        }
+        const mx = horizontal ? (from.x + from.w + node.x) / 2 : from.x + from.w / 2;
+        const my = horizontal ? from.y + from.h / 2 : (from.y + from.h + node.y) / 2;
+        const ortho = horizontal
+          ? `M ${from.x + from.w} ${from.y + from.h / 2} H ${mx} V ${node.y + node.h / 2} H ${node.x}`
+          : `M ${from.x + from.w / 2} ${from.y + from.h} V ${my} H ${node.x + node.w / 2} V ${node.y}`;
+        edges.push({ id: `${from.id}->${node.id}`, d, ortho, live: node.view.running });
       }
 
       const width = Math.max(NODE_W, ...nodes.map((node) => node.x + node.w)) + pad;
@@ -1126,8 +1168,28 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 
     function Canvas(props) {
       const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef } = props;
-      const roots = React.useMemo(() => ['needs', 'running', 'idle'].flatMap((state) => groups[state]), [groups]);
-      const layout = React.useMemo(() => layoutForest(roots, model), [roots, model]);
+      const [direction, setDirection] = React.useState('lr');
+      const [scope, setScope] = React.useState('all');
+      const [edgeStyle, setEdgeStyle] = React.useState('curve');
+      const focusId = focus && focus.id ? focus.id : undefined;
+      const scopeRootId = React.useMemo(() => {
+        let id = focusId || selectedId;
+        for (let guard = 0; id && guard < 64; guard += 1) {
+          const view = model.views.get(id);
+          if (!view) return id;
+          const parentId = view.row && typeof view.row.parentId === 'string' ? view.row.parentId : undefined;
+          if (!parentId) return id;
+          id = parentId;
+        }
+        return id;
+      }, [focusId, selectedId, model]);
+      const allRoots = React.useMemo(() => ['needs', 'running', 'idle'].flatMap((state) => groups[state]), [groups]);
+      const roots = React.useMemo(() => {
+        if (scope !== 'focus') return allRoots;
+        const scoped = scopeRootId ? allRoots.find((root) => root.id === scopeRootId) : undefined;
+        return scoped ? [scoped] : allRoots;
+      }, [allRoots, scope, scopeRootId]);
+      const layout = React.useMemo(() => layoutForest(roots, model, direction), [roots, model, direction]);
       const [camera, setCamera] = React.useState({ x: 24, y: 24, k: 1 });
       const cameraRef = React.useRef(camera);
       cameraRef.current = camera;
@@ -1135,7 +1197,6 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       const panRef = React.useRef(null);
       const fittedRef = React.useRef('');
       const [panning, setPanning] = React.useState(false);
-      const focusId = focus && focus.id ? focus.id : undefined;
 
       const fit = React.useCallback(
         (onlyId) => {
@@ -1173,11 +1234,11 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
       );
 
       React.useEffect(() => {
-        const key = `${focusId || 'all'}:${focus && focus.nonce ? focus.nonce : 0}:${layout.nodes.length}`;
+        const key = `${focusId || 'all'}:${focus && focus.nonce ? focus.nonce : 0}:${layout.nodes.length}:${direction}:${scope}`;
         if (fittedRef.current === key) return;
         fittedRef.current = key;
         fit(focusId);
-      }, [fit, focusId, focus, layout]);
+      }, [fit, focusId, focus, layout, direction, scope]);
 
       React.useEffect(() => {
         if (fitRef) fitRef.current = () => fit(focusId);
@@ -1262,7 +1323,9 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
               h(
                 'svg',
                 { className: 'mc-canvasEdges', width: layout.width, height: layout.height, viewBox: `0 0 ${layout.width} ${layout.height}`, 'aria-hidden': true },
-                layout.edges.map((edge) => h('path', { key: edge.id, className: 'mc-edge', 'data-live': edge.live ? 'true' : 'false', d: edge.d })),
+                layout.edges.map((edge) =>
+                  h('path', { key: edge.id, className: 'mc-edge', 'data-live': edge.live ? 'true' : 'false', d: edgeStyle === 'ortho' ? edge.ortho : edge.d }),
+                ),
               ),
               layout.clusters.map((cluster) =>
                 h(
@@ -1285,6 +1348,28 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
                 }),
               ),
             ),
+        h(
+          'div',
+          { className: 'mc-canvasOptions' },
+          h(
+            'div',
+            { className: 'mc-seg', role: 'group' },
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.lrTitle'), 'aria-pressed': direction === 'lr' ? 'true' : 'false', onClick: () => setDirection('lr') }, t('canvas.lr')),
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.tbTitle'), 'aria-pressed': direction === 'tb' ? 'true' : 'false', onClick: () => setDirection('tb') }, t('canvas.tb')),
+          ),
+          h(
+            'div',
+            { className: 'mc-seg', role: 'group' },
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.allScopeTitle'), 'aria-pressed': scope === 'all' ? 'true' : 'false', onClick: () => setScope('all') }, t('canvas.allScope')),
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.focusScopeTitle'), 'aria-pressed': scope === 'focus' ? 'true' : 'false', onClick: () => setScope('focus') }, t('canvas.focusScope')),
+          ),
+          h(
+            'div',
+            { className: 'mc-seg', role: 'group' },
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.curveTitle'), 'aria-pressed': edgeStyle === 'curve' ? 'true' : 'false', onClick: () => setEdgeStyle('curve') }, t('canvas.curve')),
+            h('button', { type: 'button', className: 'mc-segBtn', title: t('canvas.orthoTitle'), 'aria-pressed': edgeStyle === 'ortho' ? 'true' : 'false', onClick: () => setEdgeStyle('ortho') }, t('canvas.ortho')),
+          ),
+        ),
         h(
           'div',
           { className: 'mc-canvasCtl' },
