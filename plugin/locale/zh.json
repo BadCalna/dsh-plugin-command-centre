@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "title": "任务指挥台",
+    "description": "一屏看所有对话任务的进度、subagent 关系与产出（V1a 只读）。"
+  },
+  "panel": "任务指挥台",
+  "group": {
+    "needs": "需要你",
+    "running": "运行中",
+    "idle": "空闲"
+  }
+}

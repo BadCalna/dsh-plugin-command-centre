@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "title": "Mission Control",
+    "description": "One page for every task's progress, Subagent tree and output. Read-only V1a."
+  },
+  "panel": "Mission Control",
+  "group": {
+    "needs": "Needs you",
+    "running": "Running",
+    "idle": "Idle"
+  }
+}
