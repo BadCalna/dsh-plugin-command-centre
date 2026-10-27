@@ -104,6 +104,7 @@ assert(plugin.inject.includes('sessions') && plugin.inject.includes('shortcuts')
 const registered = [];
 const injectedSlots = [];
 let dictionaries = null;
+const delivered = [];
 const panelSelections = [];
 const registeredShortcuts = [];
 const ctx = {
@@ -265,7 +266,7 @@ const projection = {
   a2: { subagentTiming: { active: { since: now - 180000, through: now - 60000 } } },
   c: {
     missionControl: {
-      text: '迁移失败：SQL 语法错误',
+      text: '**迁移失败**：SQL 语法错误',
       tool: 'bash',
       toolError: 'FS_NOT_FOUND',
       turn: 3,
@@ -436,6 +437,10 @@ const panelProps = {
   useWorkspaces: (selector) => selector(workspaces),
   openSession: () => {},
   refreshProjections: () => Promise.resolve(),
+  deliverToSession: (id, text) => {
+    delivered.push({ id, text });
+    return Promise.resolve({ accepted: true });
+  },
 };
 
 const expandedOnce = expand(React.createElement(main.component, panelProps));
@@ -459,6 +464,9 @@ failedCard.props.onClick(fakeEvent);
 const failedDrawer = render(expandPanel());
 assert(failedDrawer.includes('migrate.log'), 'drawer file zone lists projected files');
 assert(failedDrawer.includes('结束原因') && failedDrawer.includes('error'), 'drawer shows the turn outcome');
+const dialogueSpan = findFirst(expandPanel(), (node) => node.props && node.props.style && node.props.style.whiteSpace === 'pre-wrap');
+assert(dialogueSpan, 'dialogue text span rendered');
+assert(nodeText(dialogueSpan) === '迁移失败：SQL 语法错误', `dialogue text is flattened from markdown (got: ${nodeText(dialogueSpan)})`);
 
 // ---- settings panel: default view choice ----
 let settingsTree = expandPanel();
@@ -490,6 +498,27 @@ const previewRoot = findFirst(previewTree, (node) => node.props && node.props.cl
 assert(previewRoot, 'preview overlay element found');
 const closePreview = findFirst(previewRoot, (node) => node.type === 'button' && node.children && node.children[0] === '✕');
 assert(closePreview, 'preview overlay has a close button');
+
+// ---- dropping a projected file on a task opens the delivery confirm ----
+closePreview.props.onClick(fakeEvent);
+let dropTree = expandPanel();
+const targetCard = findFirst(dropTree, (node) => node.type === 'div' && node.props && node.props.className === 'mc-card' && nodeText(node).includes('重构支付模块'));
+assert(targetCard, 'delivery target card rendered');
+targetCard.props.onDrop({
+  preventDefault() {},
+  currentTarget: { setAttribute() {}, removeAttribute() {} },
+  dataTransfer: { getData: () => '/tmp/notes/auth.md' },
+});
+dropTree = expandPanel();
+assert(countClass(dropTree, 'mc-delivery') === 1, 'dropping a file opens the delivery confirm');
+const deliveryText = render(dropTree);
+assert(deliveryText.includes('auth.md') && deliveryText.includes('投递'), 'confirm names the file and offers delivery');
+const sendButton = findFirst(dropTree, (node) => node.type === 'button' && node.children && node.children[0] === '投递');
+assert(sendButton, 'delivery send button rendered');
+sendButton.props.onClick(fakeEvent);
+dropTree = expandPanel();
+assert(countClass(dropTree, 'mc-delivery') === 1, 'delivery overlay stays open while sending');
+assert(render(dropTree).includes('读取中'), 'delivery shows a sending state');
 
 // ---- canvas view ----
 function expandPanel() {

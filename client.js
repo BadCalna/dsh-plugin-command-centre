@@ -109,6 +109,18 @@ window.__ModuleLoader__.load({
       crashed: '这个面板渲染出错，已降级为空视图。',
       errors: { noStore: '会话列表不可用' },
       shortcut: { open: '打开 / 返回 Command Centre' },
+      delivery: {
+        title: '投递文件引用',
+        target: '目标',
+        hint: '会在目标会话里排一条用户消息（queue 模式），不会打断正在跑的回合',
+        withSummary: '附带最近回答摘要',
+        send: '投递',
+        cancel: '取消',
+        sent: '已投递',
+        failed: '投递失败',
+        dropHint: '拖文件到节点上可投递',
+        files: '文件',
+      },
       settings: {
         title: '设置',
         open: '设置',
@@ -224,6 +236,30 @@ window.__ModuleLoader__.load({
       crashed: 'This panel crashed and fell back to an empty view.',
       errors: { noStore: 'Session list unavailable' },
       shortcut: { open: 'Open / return to Command Centre' },
+      delivery: {
+        title: '投递文件引用',
+        target: '目标',
+        hint: '会在目标会话里排一条用户消息（queue 模式），不会打断正在跑的回合',
+        withSummary: '附带最近回答摘要',
+        send: '投递',
+        cancel: '取消',
+        sent: '已投递',
+        failed: '投递失败',
+        dropHint: '拖文件到节点上可投递',
+        files: '文件',
+      },
+      delivery: {
+        title: 'Deliver file references',
+        target: 'Target',
+        hint: 'Queues one user message in the target session; a running turn is not interrupted',
+        withSummary: 'Include the last answer summary',
+        send: 'Deliver',
+        cancel: 'Cancel',
+        sent: 'Delivered',
+        failed: 'Delivery failed',
+        dropHint: 'Drop a file on a node to deliver it',
+        files: 'Files',
+      },
       settings: {
         title: 'Settings',
         open: 'Settings',
@@ -307,6 +343,32 @@ window.__ModuleLoader__.load({
       const tail = keep && keep > 0 ? keep : 2;
       if (parts.length <= tail) return String(path);
       return `…/${parts.slice(-tail).join('/')}`;
+    }
+
+    /** Very small markdown flattening: enough for a 200-char answer preview. */
+    function plainMarkdown(text) {
+      if (typeof text !== 'string') return '';
+      return text
+        .replace(/```[a-zA-Z0-9]*\n?/g, '')
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1 $2')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+        .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+        .replace(/^\s{0,3}>\s?/gm, '')
+        .replace(/^\s{0,3}[-*+]\s+/gm, '• ')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/__([^_]+)__/g, '$1')
+        .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1$2')
+        .replace(/`([^`]+)`/g, '$1')
+        .trim();
+    }
+
+    let draggedFilePath = null;
+
+    function deliveryMessage(files, summary) {
+      const lines = ['[Command Centre] 共享文件引用：'];
+      for (const file of files) lines.push(`- ${file}`);
+      if (summary) lines.push('', `最近回答摘要：${summary}`);
+      return lines.join('\n');
     }
 
     function fileKind(path) {
@@ -828,7 +890,14 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-canvasOptions{position:absolute;left:10px;top:10px;z-index:3;display:flex;gap:6px;flex-wrap:wrap}
 .mc-canvasCtl{position:absolute;right:10px;bottom:10px;z-index:3;display:flex;align-items:center;gap:3px;padding:4px 5px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 94%,transparent)}
 .mc-canvasZoom{font-family:var(--mc-mono);font-size:10px;color:var(--dsw-alias-label-tertiary);min-width:40px;text-align:center;font-variant-numeric:tabular-nums}
-.mc-itemLink{cursor:pointer;border-radius:2px}
+.mc-itemLink{cursor:grab;border-radius:2px}
+.mc-node[data-drop=true],.mc-card[data-drop=true]{border-color:var(--cc-accent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cc-accent) 45%,transparent)}
+.mc-deliveryRow{display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 0;border-bottom:1px solid color-mix(in srgb,var(--cc-hair) 60%,transparent)}
+.mc-deliveryCheck{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dsw-alias-label-secondary);padding:8px 0}
+.mc-deliveryList{margin:6px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3px;max-height:180px;overflow:auto}
+.mc-deliveryFile{font-family:var(--mc-mono);font-size:10.5px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.mc-deliveryOk{color:var(--mc-ok);font-size:11.5px;font-family:var(--mc-mono)}
+.mc-deliveryErr{color:var(--cc-ink-err);font-size:11.5px;font-family:var(--mc-mono);overflow-wrap:anywhere}
 .mc-itemLink:hover .mc-itemText{color:var(--cc-accent-ink);text-decoration:underline;text-underline-offset:2px}
 .mc-preview{position:absolute;inset:0;z-index:7;display:flex;flex-direction:column;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 98%,transparent);border:1px solid color-mix(in srgb,var(--cc-accent) 30%,var(--cc-hair))}
 .mc-previewHead{flex:none;display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--cc-hair);min-width:0}
@@ -942,6 +1011,25 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           'aria-current': selected ? 'true' : undefined,
           onClick: () => onSelect(view.id),
           onDoubleClick: () => onOpen(view.id),
+          onDragOver: (event) => {
+            if (typeof props.onDropFile !== 'function') return;
+            event.preventDefault();
+            event.currentTarget.setAttribute('data-drop', 'true');
+          },
+          onDragLeave: (event) => event.currentTarget.removeAttribute('data-drop'),
+          onDrop: (event) => {
+            event.currentTarget.removeAttribute('data-drop');
+            if (typeof props.onDropFile !== 'function') return;
+            event.preventDefault();
+            let file = '';
+            try {
+              file = event.dataTransfer.getData('text/plain');
+            } catch {
+              file = '';
+            }
+            if (!file) file = draggedFilePath || '';
+            if (file) props.onDropFile(view.id, file);
+          },
         },
         h(
           'div',
@@ -1067,7 +1155,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
     }
 
     function Board(props) {
-      const { groups, model, t, now, selectedId, onSelect, onOpen, expanded, onToggle, onFocusCanvas } = props;
+      const { groups, model, t, now, selectedId, onSelect, onOpen, expanded, onToggle, onFocusCanvas, onDropFile } = props;
       return h(
         'div',
         { className: 'mc-board', role: 'list' },
@@ -1099,6 +1187,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                       onSelect,
                       onOpen,
                       onFocusCanvas,
+                      onDropFile,
                       expanded,
                       onToggle,
                     }),
@@ -1339,6 +1428,25 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           title: view.title,
           style: { left: node.x, top: node.y, width: node.w, height: node.h },
           onDoubleClick: () => onOpen(view.id),
+          onDragOver: (event) => {
+            if (typeof props.onDropFile !== 'function') return;
+            event.preventDefault();
+            event.currentTarget.setAttribute('data-drop', 'true');
+          },
+          onDragLeave: (event) => event.currentTarget.removeAttribute('data-drop'),
+          onDrop: (event) => {
+            event.currentTarget.removeAttribute('data-drop');
+            if (typeof props.onDropFile !== 'function') return;
+            event.preventDefault();
+            let file = '';
+            try {
+              file = event.dataTransfer.getData('text/plain');
+            } catch {
+              file = '';
+            }
+            if (!file) file = draggedFilePath || '';
+            if (file) props.onDropFile(view.id, file);
+          },
         },
         h(
           'div',
@@ -1382,7 +1490,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
     }
 
     function Canvas(props) {
-      const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef } = props;
+      const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef, onDropFile } = props;
       const stored = React.useMemo(() => readLocalCanvasPrefs(), []);
       const [direction, setDirection] = React.useState(stored && stored.direction === 'lr' ? 'lr' : 'tb');
 
@@ -1629,6 +1737,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                   selected: selectedId === node.id,
                   onSelect,
                   onOpen,
+                  onDropFile,
                 }),
               ),
             ),
@@ -2046,7 +2155,20 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                               {
                                 className: 'mc-item mc-itemLink',
                                 key: file,
-                                title: file,
+                                title: `${file}\n${t('delivery.dropHint')}`,
+                                draggable: true,
+                                onDragStart: (event) => {
+                                  draggedFilePath = file;
+                                  try {
+                                    event.dataTransfer.setData('text/plain', file);
+                                    event.dataTransfer.effectAllowed = 'copy';
+                                  } catch {
+                                    /* drag payload is optional */
+                                  }
+                                },
+                                onDragEnd: () => {
+                                  draggedFilePath = null;
+                                },
                                 onClick: () => {
                                   if (onPreview) onPreview(file);
                                 },
@@ -2063,7 +2185,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                     'div',
                     { className: 'mc-zone' },
                     h('span', { className: 'mc-zoneTitle' }, t('drawer.dialogue')),
-                    h('span', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, output.text || t('drawer.noText')),
+                    h('span', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }, title: output.text }, plainMarkdown(output.text) || t('drawer.noText')),
                   ),
                 )
               : h('div', { className: 'mc-zone' }, h('span', { className: 'mc-zoneTitle' }, t('drawer.output')), h('span', null, t('drawer.outputPending'))),
@@ -2077,6 +2199,58 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
             ? h('button', { type: 'button', className: 'mc-btn', onClick: () => onOpenParent(view.row.parentId) }, t('action.openParent'))
             : null,
           h('button', { type: 'button', className: 'mc-btn', onClick: onClose }, t('action.close')),
+        ),
+      );
+    }
+
+    function DeliveryConfirm(props) {
+      const { t, targetTitle, files, status, error, onCancel, onSend } = props;
+      const [withSummary, setWithSummary] = React.useState(false);
+      const busy = status === 'sending';
+      return h(
+        'div',
+        { className: 'mc-preview mc-delivery', role: 'dialog', 'aria-label': t('delivery.title') },
+        h(
+          'div',
+          { className: 'mc-previewHead' },
+          h('span', { className: 'mc-previewName' }, t('delivery.title')),
+          h('button', { type: 'button', className: 'mc-btn', onClick: onCancel, title: t('action.close'), 'aria-label': t('action.close') }, '✕'),
+        ),
+        h(
+          'div',
+          { className: 'mc-previewBody' },
+          h('div', { className: 'mc-deliveryRow' }, h('span', { className: 'mc-settingsLabel' }, t('delivery.target')), h('span', { style: { fontFamily: MONO, fontSize: 12 } }, targetTitle || '—')),
+          h(
+            'div',
+            { className: 'mc-deliveryRow', style: { flexDirection: 'column', alignItems: 'flex-start', gap: 2 } },
+            h('span', { className: 'mc-settingsLabel' }, `${t('delivery.files')} · ${files.length}`),
+            h('ul', { className: 'mc-deliveryList' }, files.map((file) => h('li', { className: 'mc-deliveryFile', key: file, title: file }, shortPath(file, 3)))),
+          ),
+          h(
+            'label',
+            { className: 'mc-deliveryCheck' },
+            h('input', { type: 'checkbox', checked: withSummary, onChange: (event) => setWithSummary(event.target.checked) }),
+            t('delivery.withSummary'),
+          ),
+          h('div', { className: 'mc-previewNote' }, t('delivery.hint')),
+          status === 'sent' ? h('div', { className: 'mc-deliveryOk' }, t('delivery.sent')) : null,
+          status === 'error' ? h('div', { className: 'mc-deliveryErr' }, `${t('delivery.failed')}: ${error}`) : null,
+        ),
+        h(
+          'div',
+          { className: 'mc-previewFoot' },
+          h('button', { type: 'button', className: 'mc-btn', onClick: onCancel }, t('delivery.cancel')),
+          h('div', { className: 'mc-footSpacer' }),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'mc-btn mc-primary',
+              disabled: busy || status === 'sent',
+              onClick: () => onSend(withSummary),
+            },
+            busy ? t('drawer.loading') : t('delivery.send'),
+          ),
         ),
       );
     }
@@ -2240,6 +2414,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       const [previewFile, setPreviewFile] = React.useState(null);
       const [settingsOpen, setSettingsOpen] = React.useState(false);
       const [settings, setSettings] = React.useState({ defaultView: 'board', quiet: false, restoreView: false });
+      const [delivery, setDelivery] = React.useState(null);
       const viewTouchedRef = React.useRef(false);
       const canvasFitRef = React.useRef(null);
       const [expanded, setExpanded] = React.useState({});
@@ -2303,6 +2478,32 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       const idleCount = model.roots.filter((root) => !root.running && !root.pending && !(root.output && root.output.failed)).length;
       const phase = list && typeof list.phase === 'string' ? list.phase : 'pending';
       const selected = selectedId ? model.views.get(selectedId) : undefined;
+
+      const onDropFile = React.useCallback(
+        (targetId, file) => {
+          if (!targetId || !file) return;
+          setDelivery({ targetId, sourceId: selectedId, files: [file], status: 'idle', error: '' });
+        },
+        [selectedId],
+      );
+
+      const sendDelivery = (withSummary) => {
+        if (!delivery) return;
+        const targetId = delivery.targetId;
+        const files = delivery.files.slice();
+        const source = delivery.sourceId ? model.views.get(delivery.sourceId) : undefined;
+        const summary = withSummary && source && source.output ? plainMarkdown(source.output.text).slice(0, 200) : '';
+        setDelivery((previous) => (previous ? { ...previous, status: 'sending', error: '' } : previous));
+        const call = props.deliverToSession;
+        Promise.resolve()
+          .then(() => (typeof call === 'function' ? call(targetId, deliveryMessage(files, summary)) : Promise.reject(new Error('delivery unavailable'))))
+          .then(() => setDelivery((previous) => (previous ? { ...previous, status: 'sent' } : previous)))
+          .catch((error) =>
+            setDelivery((previous) =>
+              previous ? { ...previous, status: 'error', error: error && error.message ? error.message : String(error) } : previous,
+            ),
+          );
+      };
 
       const focusPanel = React.useCallback(() => {
         const node = rootRef.current;
@@ -2544,6 +2745,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                     onOpen: openSession,
                     expanded,
                     onToggle: toggleRow,
+                    onDropFile,
                     onFocusCanvas: (id) => {
                       viewTouchedRef.current = true;
                       setCanvasFocus({ id, nonce: Date.now() });
@@ -2562,6 +2764,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                       onOpen: openSession,
                       focus: canvasFocus,
                       fitRef: canvasFitRef,
+                      onDropFile,
                     }),
         ),
         selected
@@ -2590,6 +2793,20 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                 setSettings(next);
                 setQuiet(next.quiet);
               },
+            })
+          : null,
+        delivery
+          ? h(DeliveryConfirm, {
+              t,
+              targetTitle: (() => {
+                const view = model.views.get(delivery.targetId);
+                return view ? view.title : delivery.targetId;
+              })(),
+              files: delivery.files,
+              status: delivery.status,
+              error: delivery.error,
+              onCancel: () => setDelivery(null),
+              onSend: sendDelivery,
             })
           : null,
         previewFile
@@ -2670,6 +2887,13 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           await session.openWorkspacePath({ path });
         },
         fileBytesUrl: (path) => `api/file?path=${encodeURIComponent(path)}`,
+        deliverToSession: async (sessionId, text) => {
+          const sessions = ctx.sessions;
+          if (!sessions || typeof sessions.using !== 'function') throw new Error('sessions service unavailable');
+          await sessions.using(sessionId, { source: 'mission-control' }, (reference) =>
+            reference.binding.session.prompt([{ type: 'text', text }], 'queue'),
+          );
+        },
       };
 
       ctx.slots.inject('main', () =>

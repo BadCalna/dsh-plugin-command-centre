@@ -1,6 +1,6 @@
 # STATUS — Command Centre
 
-> 最后更新：2026-10-27 · v0.8.0（画布可用性 + 文件预览 + 设置）。
+> 最后更新：2026-10-27 · v0.9.0（节点间投递 + 对话区 markdown 扁平化）。
 
 ## 现在是什么状态
 
@@ -24,6 +24,8 @@
   - `v0.8.0` 画布：连线加粗+主题色+选中链路高亮、滚轮直接缩放（Shift+滚轮平移）、去掉「子树」范围开关；
     产出文件可点开面板内预览（文本/代码/图片 + 在桌面打开，走 `remote.workspaceFiles` / `remote.session.openWorkspacePath`）；
     新增 ⚙ 设置：默认界面 / 安静模式默认开 / 记住上次界面（存 Host prefs）
+  - `v0.9.0` 节点间**投递**：抽屉文件行可拖到看板卡片 / 画布节点 → 确认框（目标、文件、可选附带来源摘要）
+    → `sessions.using(...).binding.session.prompt([{type:'text'}], 'queue')`；对话区 markdown 扁平化
 
 ## 关键结论 / 踩过的坑
 
