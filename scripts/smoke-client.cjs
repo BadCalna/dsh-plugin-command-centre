@@ -678,6 +678,28 @@ assert(deliveredDrawer.includes('交付'), 'the deliverable row is tagged');
 assert(deliveredDrawer.includes('build_deck.mjs'), 'write/edit helper scripts stay listed too');
 assert(deliveredDrawer.includes('第 7 页改成 Q1—Q4 进度条'), 'the agent description is surfaced');
 
+// A file row dragged out of the drawer must be droppable on a canvas node: the scrim
+// stops swallowing pointer events for the duration of the HTML5 drag.
+const droppableRow = findFirst(expandPanel(), (node) => node.type === 'li' && node.props && typeof node.props.className === 'string' && node.props.className.includes('mc-itemLink'));
+assert(droppableRow, 'the drawer exposes draggable file rows');
+const rootForDrag = () => findFirst(expandPanel(), (node) => node.props && typeof node.props.className === 'string' && node.props.className.split(/\s+/).includes('mc-root'));
+assert(rootForDrag().props['data-file-drag'] === 'false', 'no file drag by default');
+droppableRow.props.onDragStart({ dataTransfer: { setData() {}, effectAllowed: '' } });
+assert(rootForDrag().props['data-file-drag'] === 'true', 'dragging a file row opens the canvas to drops');
+droppableRow.props.onDragEnd();
+assert(rootForDrag().props['data-file-drag'] === 'false', 'ending the drag restores the scrim');
+
+// ---- conversation-header back seat ----
+const backSeat = registered.find((entry) => entry.options && entry.options.name === 'conversation.header.leading');
+assert(backSeat, 'the conversation-header back seat is registered');
+assert(injectedSlots.includes('conversation.header.leading'), 'the back seat waits for its slot to be declared');
+const backTree = backSeat.component({});
+assert(render(backTree).includes('指挥台'), 'the back seat renders its label');
+const backButton = findFirst(backTree, (node) => node.type === 'button' && node.props && node.props.className === 'mc-back');
+assert(backButton, 'the back seat is a button');
+backButton.props.onClick(fakeEvent);
+assert(panelSelections[panelSelections.length - 1] === 'mission', 'clicking the back seat returns to the Command Centre panel');
+
 // ---- canvas view ----
 function expandPanel() {
   resetHooks();

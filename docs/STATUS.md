@@ -1,6 +1,6 @@
 # STATUS — Command Centre
 
-> 最后更新：2026-10-28 · v0.9.4（输入框按键隔离/IME + 主题切换 + 懒加载投影；性能结论）。
+> 最后更新：2026-10-28 · v0.10.0（对话里的「← 指挥台」返回位 + 跨节点拖文件打通）。
 
 ## 现在是什么状态
 
@@ -61,6 +61,12 @@
     （best-effort：写该会话的持久化 view 偏好 `localStorage["dsh.conversation.<id>"].view='trajectory'` 再 `uiWorkspace.openSession`；
     没有公开"选视图"API）；不可用时退化为面板内紧凑轨迹并在底部提示怎么开启「显示代码工作视图」；
     ⑤ 实测结论见下表「性能」行
+  - `v0.10.0` ① **「← 指挥台」返回位**：注册宿主 `conversation.header.leading`（single / root scope /
+    replaceRisk `none`、当前无 occupant）放一个自绘小按钮，回 `mission` 面板；面板用模块级 `panelMemory`
+    记住 `selectedId` + `viewMode`，重挂载时恢复（并跳过 settings 的默认视图覆盖、恢复画布聚焦）；
+    注册失败只 console.warn，不拖垮插件；
+    ② **跨节点拖文件打通**：拖抽屉文件行时根节点置 `data-file-drag=true`，遮罩层 `pointer-events:none`、
+    画布节点高亮为投放目标，松开落到目标节点进入投递确认（之前遮罩会吞掉 drop）
 
 ## 关键结论 / 踩过的坑
 
@@ -91,10 +97,6 @@ Client 用它做产出列（`2F`/`TXT`/`ERR`）、抽屉「文件区 + 对话区
 
 ## 下一步候选
 
-0. **从画布/看板进对话后的「返回」**（用户 2026-10-28 指定为下一个 feat）：现在跳进 Conversation 后只能靠 `⌘⇧P`
-   或侧栏图标回来。计划：进入前记住来源（panel + 选中节点/滚动位置），在 Conversation 里挂一个轻量「← 回指挥台」
-   徽标（需要找一个宿主允许插的槽位：右侧栏/会话头部/浮层），点击回 `mission` 面板并恢复到原来选中的节点；
-   需要先确认 `slots` 里有没有不带"DO NOT register"警告的会话级槽位（`docs/design/panel-api.md` 有槽位清单）
 1. 画布 P1：节点折叠 `+N`、键盘 DFS 提示、节点内联展开
 2. 产出更准：接 `ctx.workspaceChanges.summary` / `/api/changes.summary` 拿真实 turn 改动
 3. workflow 阶段节点（仍缺 Host 事件投影，需要 fold `tool-workflow/*` 会话事件）

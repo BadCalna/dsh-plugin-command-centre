@@ -103,6 +103,7 @@ window.__ModuleLoader__.load({
         outputPending: '产出投影接入中（Host 未加载）',
       },
       action: { open: '打开对话', openParent: '打开父对话', close: '关闭', refresh: '刷新', canvas: '在画布中聚焦' },
+      back: { label: '指挥台', title: '返回 Command Centre（恢复上次选中的任务）' },
       filter: { all: '全部', active: '只看活跃', needs: '只看待你' },
       search: '搜索任务…',
       quiet: '安静',
@@ -267,6 +268,7 @@ window.__ModuleLoader__.load({
         outputPending: 'Output projection not loaded by the Host yet',
       },
       action: { open: 'Open conversation', openParent: 'Open parent', close: 'Close', refresh: 'Refresh', canvas: 'Focus in canvas' },
+      back: { label: 'Command Centre', title: 'Back to Command Centre (restores the last selected task)' },
       filter: { all: 'All', active: 'Active', needs: 'Waiting' },
       search: 'Search tasks…',
       quiet: 'Quiet',
@@ -506,6 +508,15 @@ window.__ModuleLoader__.load({
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (typeof event.stopPropagation === 'function') event.stopPropagation();
     }
+
+    /** Last selection/view of the panel, kept across the panel's unmount (conversation visits). */
+    let panelMemory = null;
+
+    /** Style for the conversation-header "back" seat (the panel CSS is not mounted here). */
+    const BACK_CSS =
+      '.mc-back{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;margin-right:8px;border:1px solid var(--dsw-alias-border-l3, #d5dade);border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary, #55606b);font-family:var(--dsw-font-mono, ui-monospace, Menlo, monospace);font-size:10.5px;line-height:1;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;white-space:nowrap}' +
+      '.mc-back:hover{color:var(--dsw-alias-label-primary, #1d232a);border-color:color-mix(in srgb, var(--dsw-alias-label-tertiary, #8b949e) 60%, var(--dsw-alias-border-l3, #d5dade));background:color-mix(in srgb, var(--dsw-alias-label-primary, #1d232a) 6%, transparent)}' +
+      '.mc-back:focus-visible{outline:var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, #2f7de1);outline-offset:1px}';
 
     let draggedFilePath = null;
 
@@ -1123,6 +1134,8 @@ button.mc-chip:hover{border-color:var(--cc-hair-hi);color:var(--dsw-alias-label-
 
 /* ---------- drawer ---------- */
 .mc-scrim{position:absolute;inset:0;z-index:4;background:linear-gradient(90deg,transparent,color-mix(in srgb,#000 34%,transparent))}
+.mc-root[data-file-drag=true] .mc-scrim{pointer-events:none}
+.mc-root[data-file-drag=true] .mc-canvas .mc-node{border-color:color-mix(in srgb,var(--cc-accent) 55%,var(--cc-hair));box-shadow:0 0 0 1px color-mix(in srgb,var(--cc-accent) 35%,transparent)}
 .mc-drawer{position:absolute;top:0;right:0;bottom:0;width:min(420px,44vw);display:flex;flex-direction:column;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 97%,transparent);border-left:1px solid color-mix(in srgb,var(--cc-accent) 40%,var(--cc-hair));box-shadow:-32px 0 64px -48px #000,-1px 0 0 color-mix(in srgb,var(--cc-accent) 18%,transparent);z-index:5;animation:mc-drawer-in .18s cubic-bezier(.2,.8,.2,1) both}
 @keyframes mc-drawer-in{from{transform:translateX(14px);opacity:0}to{transform:none;opacity:1}}
 .mc-drawerHead{flex:none;display:flex;align-items:flex-start;gap:8px;padding:11px 14px 9px;border-bottom:1px solid var(--cc-hair);position:relative}
@@ -2714,7 +2727,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
 
     // #region drawer
     function Drawer(props) {
-      const { view, model, t, now, onClose, onOpen, onOpenParent, onPreview } = props;
+      const { view, model, t, now, onClose, onOpen, onOpenParent, onPreview, onFileDrag } = props;
       const values = view.values || {};
       const goal = values.goal && values.goal.goal ? values.goal : undefined;
       const team = values.agentTeam;
@@ -2929,6 +2942,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                                 draggable: true,
                                 onDragStart: (event) => {
                                   draggedFilePath = file;
+                                  if (typeof onFileDrag === 'function') onFileDrag(true);
                                   try {
                                     event.dataTransfer.setData('text/plain', file);
                                     event.dataTransfer.effectAllowed = 'copy';
@@ -2938,6 +2952,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                                 },
                                 onDragEnd: () => {
                                   draggedFilePath = null;
+                                  if (typeof onFileDrag === 'function') onFileDrag(false);
                                 },
                                 onClick: () => {
                                   if (onPreview) onPreview(file);
@@ -3229,18 +3244,21 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       const statuses = useSessionStatus ? useSessionStatus((snapshot) => snapshot) : undefined;
       const workspaces = useWorkspaces ? useWorkspaces((snapshot) => snapshot) : undefined;
 
-      const [selectedId, setSelectedId] = React.useState(null);
+      // Coming back from a conversation (or ⌘⇧P) restores where the user was.
+      const restored = React.useMemo(() => (panelMemory ? { ...panelMemory } : null), []);
+      const [selectedId, setSelectedId] = React.useState(() => (restored ? restored.selectedId : null));
       const [filter, setFilter] = React.useState('all');
       const [query, setQuery] = React.useState('');
       const [quiet, setQuiet] = React.useState(false);
       const [workspaceFilter, setWorkspaceFilter] = React.useState('all');
-      const [viewMode, setViewMode] = React.useState('board');
-      const [canvasFocus, setCanvasFocus] = React.useState({ id: null, nonce: 0 });
+      const [viewMode, setViewMode] = React.useState(() => (restored && restored.viewMode ? restored.viewMode : 'board'));
+      const [canvasFocus, setCanvasFocus] = React.useState(() => (restored && restored.viewMode === 'canvas' && restored.selectedId ? { id: restored.selectedId, nonce: Date.now() } : { id: null, nonce: 0 }));
       const [previewFile, setPreviewFile] = React.useState(null);
       const [settingsOpen, setSettingsOpen] = React.useState(false);
       const [settings, setSettings] = React.useState({ defaultView: 'board', quiet: false, restoreView: false, theme: 'system' });
       const [hostDark, setHostDark] = React.useState(hostPrefersDark);
       const [delivery, setDelivery] = React.useState(null);
+      const [fileDragging, setFileDragging] = React.useState(false);
       const viewTouchedRef = React.useRef(false);
       const canvasFitRef = React.useRef(null);
       const [expanded, setExpanded] = React.useState({});
@@ -3253,6 +3271,12 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         const timer = setInterval(() => setNow(Date.now()), 15000);
         return () => clearInterval(timer);
       }, []);
+
+      // Remember the panel's own place (selected task + view) so returning from a
+      // conversation lands where the user left, not on a fresh board.
+      React.useEffect(() => {
+        panelMemory = { selectedId, viewMode };
+      }, [selectedId, viewMode]);
 
       // Follow the Host theme live so "system" keeps working when the user flips it.
       React.useEffect(() => {
@@ -3279,7 +3303,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           };
           setSettings(next);
           setQuiet(next.quiet);
-          if (!viewTouchedRef.current) {
+          if (!viewTouchedRef.current && !restored) {
             const target = next.restoreView && validView(stored.lastView) ? stored.lastView : next.defaultView;
             setViewMode(target);
           }
@@ -3497,6 +3521,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           ref: rootRef,
           className: `mc-root${quiet ? ' mc-quiet' : ''}`,
           'data-tone': tone,
+          'data-file-drag': fileDragging ? 'true' : 'false',
           tabIndex: 0,
           onKeyDown,
           role: 'region',
@@ -3639,6 +3664,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                 onOpen: openSession,
                 onOpenParent: openSession,
                 onPreview: (file) => setPreviewFile(file),
+                onFileDrag: (active) => setFileDragging(active === true),
               }),
             )
           : null,
@@ -3872,6 +3898,39 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       ctx.slots.inject('sidebar.panellist', () =>
         ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 20, locale: NS, label: () => t('panel') }, MissionIcon),
       );
+
+      // A "back to Command Centre" seat in the Conversation header. The seat is a
+      // free, root-scoped single slot (replaceRisk: none), so it needs no Session
+      // props: it only navigates back to our panel, which restores its own memory.
+      ctx.slots.inject('conversation.header.leading', () => {
+        try {
+          return ctx.slots.register(
+            { name: 'conversation.header.leading', locale: NS },
+            function BackToCentre() {
+              const goBack = () => {
+                try {
+                  ctx.layout.selectPanel(PANEL_ID);
+                } catch {
+                  /* the shell may be mid-navigation */
+                }
+              };
+              return h(
+                React.Fragment,
+                null,
+                h('style', null, BACK_CSS),
+                h('button', { type: 'button', className: 'mc-back', title: t('back.title'), 'aria-label': t('back.title'), onClick: goBack }, `← ${t('back.label')}`),
+              );
+            },
+          );
+        } catch (error) {
+          try {
+            console.warn('[command-centre] conversation header seat unavailable:', error);
+          } catch {
+            /* console may be unavailable */
+          }
+          return () => {};
+        }
+      });
 
       // Global toggle: the sidebar's panel list is hidden while it is collapsed.
       ctx.effect(() => {
