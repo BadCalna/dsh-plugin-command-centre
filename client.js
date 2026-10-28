@@ -139,7 +139,7 @@ window.__ModuleLoader__.load({
         fit: '适配',
         zoomIn: '放大',
         zoomOut: '缩小',
-        hint: '滚轮缩放 · 拖拽平移 · 0 适配 · 双击打开',
+        hint: '右键节点 · 滚轮缩放 · 拖拽平移 · 0 适配 · 双击打开',
         root: '主',
         sub: '子',
         empty: '没有可画的节点',
@@ -153,6 +153,34 @@ window.__ModuleLoader__.load({
         ortho: '直角',
         curveTitle: '贝塞尔连线',
         orthoTitle: '直角折线',
+      },
+      menu: {
+        continue: '继续对话',
+        trail: '查看工作轨迹',
+        rename: '修改标题',
+        open: '打开对话',
+      },
+      trail: {
+        title: '工作轨迹',
+        loading: '读取中…',
+        empty: '最近窗口里还没有动作',
+        note: '仅显示最近加载的事件窗口（不含更早的历史）',
+        kind: { turn: '回合', tool: '工具', say: '回答', deliver: '交付', error: '错误' },
+        close: '关闭',
+      },
+      composer: {
+        askHead: '继续对话',
+        renameHead: '修改标题',
+        placeholder: '给这个任务发一句…（会排到下一轮）',
+        hint: 'Enter 发送 · Shift+Enter 换行 · Esc 关闭',
+        renameHint: 'Enter 保存 · Esc 取消',
+        modeQueue: '排到下一轮',
+        send: '发送',
+        save: '保存',
+        sending: '发送中…',
+        sent: '已排队，下一轮送到',
+        renamed: '标题已更新',
+        unavailable: '宿主没有开放这个操作',
       },
     };
     const EN = {
@@ -282,7 +310,7 @@ window.__ModuleLoader__.load({
         fit: 'Fit',
         zoomIn: 'Zoom in',
         zoomOut: 'Zoom out',
-        hint: 'Wheel to zoom · drag to pan · 0 to fit · double-click to open',
+        hint: 'Right-click a node · wheel to zoom · drag to pan · 0 to fit · double-click to open',
         root: 'main',
         sub: 'sub',
         empty: 'No nodes to draw',
@@ -296,6 +324,34 @@ window.__ModuleLoader__.load({
         ortho: 'Ortho',
         curveTitle: 'Bezier edges',
         orthoTitle: 'Orthogonal edges',
+      },
+      menu: {
+        continue: 'Continue conversation',
+        trail: 'View work trail',
+        rename: 'Rename',
+        open: 'Open conversation',
+      },
+      trail: {
+        title: 'Work trail',
+        loading: 'Loading…',
+        empty: 'No activity in the loaded window yet',
+        note: 'Only the most recent event window is shown, not the full history',
+        kind: { turn: 'turn', tool: 'tool', say: 'reply', deliver: 'deliver', error: 'error' },
+        close: 'Close',
+      },
+      composer: {
+        askHead: 'Continue conversation',
+        renameHead: 'Rename',
+        placeholder: 'Send this task one message… (queued for the next turn)',
+        hint: 'Enter to send · Shift+Enter newline · Esc close',
+        renameHint: 'Enter to save · Esc cancel',
+        modeQueue: 'next turn',
+        send: 'Send',
+        save: 'Save',
+        sending: 'Sending…',
+        sent: 'Queued — delivered next turn',
+        renamed: 'Title updated',
+        unavailable: 'The Host does not expose this action',
       },
     };
     // #endregion
@@ -421,6 +477,16 @@ window.__ModuleLoader__.load({
       return result;
     }
 
+    /** Idempotent prompt retry key: the Host returns the original acceptance for a re-used id. */
+    function nextRequestId() {
+      try {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+      } catch {
+        /* fall through to the timestamp fallback */
+      }
+      return `mc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
     /** Friendly text for a preview read failure (deleted deliverables are common). */
     function fileErrorText(error, t) {
       const code = error && (error.code || error.name) ? String(error.code || error.name) : '';
@@ -514,6 +580,68 @@ window.__ModuleLoader__.load({
         (isNum(usage.cacheReadTokens) ? usage.cacheReadTokens : 0) +
         (isNum(usage.cacheWriteTokens) ? usage.cacheWriteTokens : 0);
       return sum > 0 ? sum : undefined;
+    }
+
+    /** Text blocks of one assistant/user message object, flattened for a trail row. */
+    function messageText(message) {
+      const blocks = message && Array.isArray(message.content) ? message.content : [];
+      const parts = [];
+      for (const block of blocks) {
+        if (block && block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') parts.push(block.text.trim());
+      }
+      return parts.join(' ');
+    }
+
+    /** A short human hint for one tool call (the file it touched, or the command). */
+    function trailToolLabel(rawArguments) {
+      if (typeof rawArguments !== 'string' || rawArguments === '') return '';
+      let parsed;
+      try {
+        parsed = JSON.parse(rawArguments);
+      } catch {
+        return rawArguments.slice(0, 60);
+      }
+      if (!parsed || typeof parsed !== 'object') return '';
+      for (const key of ['file_path', 'filePath', 'path', 'command', 'description', 'query']) {
+        const value = parsed[key];
+        if (typeof value === 'string' && value.trim() !== '') return value.length > 64 ? `${value.slice(0, 63)}…` : value;
+      }
+      return '';
+    }
+
+    /**
+     * Fold the already-loaded session event window into a compact work trail:
+     * turn separators, tool calls, answers, deliveries, tool errors. The window is
+     * the tail of the log (history pages arrive tail-first), so this is "recent
+     * work", never a full replay — and it never stores the raw events.
+     */
+    function trailRows(entries) {
+      const rows = [];
+      const list = Array.isArray(entries) ? entries : [];
+      for (const entry of list) {
+        const event = entry && entry.type === 'event' ? entry.event : entry;
+        if (!event || typeof event.type !== 'string') continue;
+        const data = event.data && typeof event.data === 'object' ? event.data : {};
+        const at = typeof event.time === 'number' ? event.time : 0;
+        if (event.type === 'turn/start') {
+          rows.push({ kind: 'turn', text: `T${typeof data.turn === 'number' ? data.turn : '?'}`, at });
+        } else if (event.type === 'tool/call') {
+          const label = trailToolLabel(data.arguments);
+          rows.push({ kind: 'tool', text: `${typeof data.name === 'string' ? data.name : 'tool'}${label ? ` · ${label}` : ''}`, at });
+        } else if (event.type === 'tool/result' && data.error) {
+          const detail = data.error && (data.error.code || data.error.message);
+          rows.push({ kind: 'error', text: detail ? String(detail) : 'tool error', at });
+        } else if (event.type === 'assistant/message') {
+          const text = messageText(data.message);
+          if (text) rows.push({ kind: 'say', text: text.length > 120 ? `${text.slice(0, 119)}…` : text, at });
+        } else if (event.type === 'deliverables/presented') {
+          for (const file of Array.isArray(data.files) ? data.files : []) {
+            const path = file && typeof file.path === 'string' ? file.path : '';
+            if (path !== '') rows.push({ kind: 'deliver', text: baseName(path), at });
+          }
+        }
+      }
+      return rows.slice(-40);
     }
 
     const FAILED_OUTCOMES = new Set(['error', 'blocked', 'max-tokens']);
@@ -959,14 +1087,14 @@ html[data-platform=darwin] .mc-drawerHead{padding-top:calc(11px + var(--dsh-fram
 .mc-edge[data-active=true]{stroke:var(--cc-accent);stroke-width:2.3;filter:drop-shadow(0 0 3px var(--cc-glow))}
 .mc-edge[data-active=true][data-live=true]{stroke:var(--mc-run)}
 @keyframes mc-edge-flow{to{stroke-dashoffset:-24}}
-.mc-node{position:absolute;cursor:grab;display:flex;flex-direction:column;gap:5px;padding:8px 9px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 94%,transparent);cursor:pointer;box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent);transition:border-color .12s linear}
+.mc-node{position:absolute;cursor:grab;display:flex;flex-direction:column;gap:5px;padding:8px 10px;border:1px solid var(--cc-hair);border-radius:10px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 94%,transparent);cursor:pointer;box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent);transition:border-color .12s linear}
 .mc-node:hover{border-color:color-mix(in srgb,var(--cc-accent) 45%,var(--cc-hair))}
 .mc-node[data-selected=true]{border-color:var(--cc-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--cc-accent) 40%,transparent),0 0 24px -14px var(--cc-accent)}
 .mc-node[data-state=needs]{border-color:color-mix(in srgb,var(--mc-warn) 52%,var(--cc-hair))}
 .mc-node[data-state=failed]{border-color:color-mix(in srgb,var(--mc-err) 55%,var(--cc-hair))}
 .mc-node[data-state=running]{box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent),0 0 0 1px color-mix(in srgb,var(--mc-run) 24%,transparent)}
 .mc-node:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);outline-offset:1px}
-.mc-nodeKind{flex:none;font-family:var(--mc-mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);border:1px solid var(--cc-hair);padding:0 4px;line-height:12px;border-radius:1px}
+.mc-nodeKind{flex:none;font-family:var(--mc-mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);border:1px solid var(--cc-hair);padding:0 4px;line-height:12px;border-radius:4px}
 .mc-canvasOptions{position:absolute;left:10px;top:10px;z-index:3;display:flex;gap:6px;flex-wrap:wrap}
 .mc-canvasCtl{position:absolute;right:10px;bottom:10px;z-index:3;display:flex;align-items:center;gap:3px;padding:4px 5px;border:1px solid var(--cc-hair);border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 94%,transparent)}
 .mc-canvasZoom{font-family:var(--mc-mono);font-size:10px;color:var(--dsw-alias-label-tertiary);min-width:40px;text-align:center;font-variant-numeric:tabular-nums}
@@ -992,6 +1120,37 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
 .mc-previewNote{color:var(--dsw-alias-label-tertiary);font-size:11px;font-family:var(--mc-mono);letter-spacing:.04em}
 .mc-previewFoot{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--cc-hair)}
 .mc-canvasHint{position:absolute;left:10px;bottom:12px;z-index:3;color:var(--dsw-alias-label-tertiary);font-family:var(--mc-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;pointer-events:none}
+.mc-menu{position:absolute;z-index:8;min-width:176px;padding:4px;display:flex;flex-direction:column;gap:1px;border:1px solid var(--cc-hair);border-radius:6px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 98%,transparent);box-shadow:0 18px 40px -24px #000,0 0 0 1px color-mix(in srgb,var(--cc-accent) 12%,transparent)}
+.mc-menuHead{max-width:240px;padding:5px 8px 4px;margin-bottom:3px;border-bottom:1px solid var(--cc-hair);font-family:var(--mc-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mc-menuItem{display:flex;align-items:center;gap:7px;padding:6px 8px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11.5px;text-align:left;cursor:pointer}
+.mc-menuItem:hover,.mc-menuItem:focus-visible{background:color-mix(in srgb,var(--cc-accent) 14%,transparent);color:var(--cc-accent-ink);outline:none}
+.mc-menuItem[data-tone=quiet]{color:var(--dsw-alias-label-secondary)}
+.mc-menuKey{margin-left:auto;font-family:var(--mc-mono);font-size:9px;color:var(--dsw-alias-label-tertiary)}
+.mc-trail{position:absolute;top:8px;right:8px;bottom:8px;z-index:7;width:min(380px,calc(100% - 16px));display:flex;flex-direction:column;border:1px solid var(--cc-hair);border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 98%,transparent);box-shadow:0 24px 48px -30px #000}
+.mc-trailHead{flex:none;display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--cc-hair);min-width:0}
+.mc-trailTitle{flex:1 1 auto;min-width:0;font-family:var(--mc-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mc-trailBody{flex:1 1 auto;min-height:0;overflow:auto;padding:6px 9px 10px;display:flex;flex-direction:column;gap:2px}
+.mc-trailRow{display:flex;align-items:baseline;gap:7px;min-width:0;font-size:11.5px;line-height:16px}
+.mc-trailKind{flex:none;width:34px;font-family:var(--mc-mono);font-size:9px;letter-spacing:.08em;color:var(--dsw-alias-label-tertiary)}
+.mc-trailText{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mc-trailTime{flex:none;font-family:var(--mc-mono);font-size:9px;color:var(--dsw-alias-label-tertiary)}
+.mc-trailRow[data-kind=turn]{margin-top:5px;padding-top:5px;border-top:1px solid color-mix(in srgb,var(--cc-hair) 60%,transparent)}
+.mc-trailRow[data-kind=turn] .mc-trailText{font-family:var(--mc-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dsw-alias-label-secondary)}
+.mc-trailRow[data-kind=tool] .mc-trailKind{color:var(--mc-run)}
+.mc-trailRow[data-kind=deliver] .mc-trailKind{color:var(--mc-ok)}
+.mc-trailRow[data-kind=error] .mc-trailKind,.mc-trailRow[data-kind=error] .mc-trailText{color:var(--cc-ink-err)}
+.mc-trailNote{padding:6px 2px;font-family:var(--mc-mono);font-size:9px;line-height:14px;color:var(--dsw-alias-label-tertiary)}
+.mc-trailNote[data-tone=err]{color:var(--cc-ink-err)}
+.mc-composer{position:absolute;z-index:7;width:min(340px,calc(100% - 20px));padding:8px 9px 9px;display:flex;flex-direction:column;gap:6px;border:1px solid color-mix(in srgb,var(--cc-accent) 45%,var(--cc-hair));border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 98%,transparent);box-shadow:0 24px 48px -30px #000}
+.mc-composerHead{display:flex;align-items:center;gap:6px;min-width:0;font-family:var(--mc-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}
+.mc-composerHead span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mc-composerInput{width:100%;min-height:64px;max-height:160px;resize:vertical;padding:6px 7px;border:1px solid var(--cc-hair);border-radius:5px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 80%,transparent);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:17px}
+.mc-composerInput:focus{outline:none;border-color:color-mix(in srgb,var(--cc-accent) 55%,var(--cc-hair))}
+.mc-composerFoot{display:flex;align-items:center;gap:6px}
+.mc-composerHint{flex:1 1 auto;font-family:var(--mc-mono);font-size:9px;letter-spacing:.04em;color:var(--dsw-alias-label-tertiary)}
+.mc-composerNote{font-family:var(--mc-mono);font-size:10px;color:var(--dsw-alias-label-secondary)}
+.mc-composerNote[data-tone=err]{color:var(--cc-ink-err)}
+.mc-composerNote[data-tone=ok]{color:var(--mc-ok)}
 .mc-canvasEmpty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:11px;font-family:var(--mc-mono);letter-spacing:.08em;text-transform:uppercase}
 
 @media (max-width:980px){.mc-board{grid-template-columns:repeat(4,minmax(186px,1fr))}.mc-headRow,.mc-row{grid-template-columns:20px minmax(0,1fr) 78px 110px 52px 26px}.mc-colCtx,.mc-colOut{display:none}}
@@ -1365,6 +1524,66 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       }
     }
 
+    /** Outward normal for one node side, in world units. */
+    function sideNormal(side) {
+      if (side === 'right') return { x: 1, y: 0 };
+      if (side === 'left') return { x: -1, y: 0 };
+      if (side === 'bottom') return { x: 0, y: 1 };
+      return { x: 0, y: -1 };
+    }
+
+    /**
+     * Pick the two facing sides for one edge from the nodes' relative geometry, so
+     * the line leaves the side that actually looks at the other node instead of
+     * being nailed to the card's right edge. Ties fall back to the dominant axis.
+     */
+    function edgeSides(from, to) {
+      const dx = to.x + to.w / 2 - (from.x + from.w / 2);
+      const dy = to.y + to.h / 2 - (from.y + from.h / 2);
+      if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? ['right', 'left'] : ['left', 'right'];
+      return dy >= 0 ? ['bottom', 'top'] : ['top', 'bottom'];
+    }
+
+    /**
+     * One anchor on a side, slid along that side toward the other node's center and
+     * kept inside the rounded corner. A parent with several children therefore
+     * fans out from distinct points instead of one crowded middle.
+     */
+    function sideAnchor(node, side, other) {
+      const otherCx = other.x + other.w / 2;
+      const otherCy = other.y + other.h / 2;
+      if (side === 'left' || side === 'right') {
+        const margin = Math.min(18, node.h / 3);
+        return {
+          x: side === 'right' ? node.x + node.w : node.x,
+          y: clamp(otherCy, node.y + margin, node.y + node.h - margin),
+        };
+      }
+      const margin = Math.min(24, node.w / 3);
+      return {
+        x: clamp(otherCx, node.x + margin, node.x + node.w - margin),
+        y: side === 'bottom' ? node.y + node.h : node.y,
+      };
+    }
+
+    const EDGE_STUB = 20;
+
+    /** Curve (default) + orthogonal path for one parent→child link. */
+    function edgeGeometry(from, to) {
+      const [fromSide, toSide] = edgeSides(from, to);
+      const a = sideAnchor(from, fromSide, to);
+      const b = sideAnchor(to, toSide, from);
+      const na = sideNormal(fromSide);
+      const nb = sideNormal(toSide);
+      const reach = clamp(Math.abs(b.x - a.x) + Math.abs(b.y - a.y), 48, 220) * 0.42;
+      const d = `M ${a.x} ${a.y} C ${a.x + na.x * reach} ${a.y + na.y * reach}, ${b.x + nb.x * reach} ${b.y + nb.y * reach}, ${b.x} ${b.y}`;
+      const p1x = a.x + na.x * EDGE_STUB;
+      const p2y = b.y + nb.y * EDGE_STUB;
+      const p2x = b.x + nb.x * EDGE_STUB;
+      const ortho = `M ${a.x} ${a.y} H ${p1x} V ${p2y} H ${p2x} V ${b.y}`;
+      return { d, ortho };
+    }
+
     /**
      * Tidy layered layout. One column/row per depth, leaves stacked in source
      * order, parents centered on the first/last child, single-child chains
@@ -1441,26 +1660,8 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         const parentId = node.view.row && typeof node.view.row.parentId === 'string' ? node.view.row.parentId : undefined;
         const from = parentId ? byId.get(parentId) : undefined;
         if (!from) continue;
-        let d;
-        let ortho;
-        if (horizontal) {
-          const sx = from.x + from.w;
-          const sy = from.y + from.h / 2;
-          const ex = node.x;
-          const ey = node.y + node.h / 2;
-          const reach = Math.max(28, (ex - sx) * 0.45);
-          d = `M ${sx} ${sy} C ${sx + reach} ${sy}, ${ex - reach} ${ey}, ${ex} ${ey}`;
-          ortho = `M ${sx} ${sy} H ${(sx + ex) / 2} V ${ey} H ${ex}`;
-        } else {
-          const sx = from.x + from.w / 2;
-          const sy = from.y + from.h;
-          const ex = node.x + node.w / 2;
-          const ey = node.y;
-          const reach = Math.max(24, (ey - sy) * 0.45);
-          d = `M ${sx} ${sy} C ${sx} ${sy + reach}, ${ex} ${ey - reach}, ${ex} ${ey}`;
-          ortho = `M ${sx} ${sy} V ${(sy + ey) / 2} H ${ex} V ${ey}`;
-        }
-        edges.push({ id: `${from.id}->${node.id}`, from: from.id, to: node.id, d, ortho, live: node.view.running });
+        const geometry = edgeGeometry(from, node);
+        edges.push({ id: `${from.id}->${node.id}`, from: from.id, to: node.id, d: geometry.d, ortho: geometry.ortho, live: node.view.running });
       }
 
       const width = Math.max(NODE_W, ...nodes.map((node) => node.x + node.w)) + pad;
@@ -1476,9 +1677,9 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
      * a broken tree (the lag is capped). All entries share the same target, so the
      * subtree keeps its shape — lively, not scattered.
      */
-    const FOLLOW_OMEGA = 58; // rad/s: how quickly a child catches its parent
-    const FOLLOW_ZETA = 0.78; // <1 -> one small overshoot on release
-    const FOLLOW_MAX_LAG = 26; // world px: hard ceiling on the trail
+    const FOLLOW_OMEGA = 38; // rad/s: how quickly a child catches its parent
+    const FOLLOW_ZETA = 0.38; // <1 -> one small overshoot on release
+    const FOLLOW_MAX_LAG = 50; // world px: hard ceiling on the trail
 
     /** Direct children (then their children) of one node, in layout order. */
     function subtreeIds(layout, rootId) {
@@ -1613,7 +1814,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
     }
 
     function Canvas(props) {
-      const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef, onDropFile } = props;
+      const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef, onDropFile, onAsk, onRename, onTrail } = props;
       const stored = React.useMemo(() => readLocalCanvasPrefs(), []);
       const [direction, setDirection] = React.useState(stored && stored.direction === 'lr' ? 'lr' : 'tb');
 
@@ -1663,6 +1864,88 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       const panRef = React.useRef(null);
       const fittedRef = React.useRef('');
       const [panning, setPanning] = React.useState(false);
+      // Right-click menu + the node's inline composer ("continue conversation").
+      const [menu, setMenu] = React.useState(null);
+      const [composer, setComposer] = React.useState(null);
+      const [trail, setTrail] = React.useState(null);
+
+      const openTrail = (id) => {
+        const node = layout.byId.get(id);
+        setMenu(null);
+        setComposer(null);
+        setTrail({ id, title: node ? node.view.title : '', rows: [], status: 'loading', error: '' });
+        Promise.resolve()
+          .then(() => (typeof onTrail === 'function' ? onTrail(id) : []))
+          .then((rows) => setTrail((previous) => (previous && previous.id === id ? { ...previous, rows: Array.isArray(rows) ? rows : [], status: 'ready' } : previous)))
+          .catch((error) => setTrail((previous) => (previous && previous.id === id ? { ...previous, status: 'error', error: error && error.message ? error.message : String(error) } : previous)));
+      };
+
+      const openComposer = (id, mode) => {
+        const node = layout.byId.get(id);
+        if (!node) return;
+        setMenu(null);
+        setComposer({
+          id,
+          mode,
+          text: mode === 'rename' ? node.view.title : '',
+          status: 'idle',
+          error: '',
+          requestId: nextRequestId(),
+        });
+      };
+
+      const submitComposer = () => {
+        const draft = composer;
+        if (!draft || draft.status === 'sending') return;
+        const text = draft.text.trim();
+        if (!text) return;
+        if (draft.mode === 'rename') {
+          if (typeof onRename !== 'function') {
+            setComposer({ ...draft, status: 'error', error: t('composer.unavailable') });
+            return;
+          }
+          setComposer({ ...draft, status: 'sending', error: '' });
+          Promise.resolve()
+            .then(() => onRename(draft.id, text))
+            .then(() => setComposer((previous) => (previous ? { ...previous, status: 'sent', text } : previous)))
+            .catch((error) => setComposer((previous) => (previous ? { ...previous, status: 'error', error: error && error.message ? error.message : String(error) } : previous)));
+          return;
+        }
+        if (typeof onAsk !== 'function') {
+          setComposer({ ...draft, status: 'error', error: t('composer.unavailable') });
+          return;
+        }
+        setComposer({ ...draft, status: 'sending', error: '' });
+        Promise.resolve()
+          .then(() => onAsk(draft.id, text, draft.requestId))
+          .then(() => setComposer((previous) => (previous && previous.id === draft.id ? { ...previous, status: 'sent', text: '', requestId: nextRequestId() } : previous)))
+          .catch((error) => setComposer((previous) => (previous && previous.id === draft.id ? { ...previous, status: 'error', error: error && error.message ? error.message : String(error) } : previous)));
+      };
+
+      const composerKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setComposer(null);
+          return;
+        }
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault();
+          submitComposer();
+        }
+      };
+
+      React.useEffect(() => {
+        if (!menu && !composer) return undefined;
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined;
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape') return;
+          setMenu(null);
+          setComposer(null);
+          setTrail(null);
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+      }, [menu, composer]);
 
       const fit = React.useCallback(
         (onlyId) => {
@@ -1826,6 +2109,9 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       const onPointerDown = (event) => {
         if (event.button !== 0) return;
         const target = event.target;
+        const inOverlay = target && typeof target.closest === 'function' ? target.closest('.mc-menu') || target.closest('.mc-composer') : null;
+        if (inOverlay) return;
+        if (menu) setMenu(null);
         const nodeEl = target && typeof target.closest === 'function' ? target.closest('.mc-node') : null;
         if (nodeEl) {
           const id = nodeEl.getAttribute('data-node-id');
@@ -1913,6 +2199,25 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         setCamera({ x: px - (px - current.x) * ratio, y: py - (py - current.y) * ratio, k });
       };
 
+      const menuNode = menu ? layout.byId.get(menu.id) : undefined;
+      const composerNode = composer ? layout.byId.get(composer.id) : undefined;
+      const wrapEl = wrapRef.current;
+      const wrapW = wrapEl && wrapEl.clientWidth ? wrapEl.clientWidth : 720;
+      const wrapH = wrapEl && wrapEl.clientHeight ? wrapEl.clientHeight : 480;
+      const menuStyle = menu
+        ? { left: clamp(menu.x, 8, Math.max(8, wrapW - 196)), top: clamp(menu.y, 8, Math.max(8, wrapH - 200)) }
+        : null;
+      let composerStyle;
+      if (composer && composerNode) {
+        const boxW = Math.min(340, wrapW - 20);
+        const preferRight = camera.x + (composerNode.x + composerNode.w) * camera.k + 12;
+        const left = preferRight + boxW > wrapW - 8 ? camera.x + composerNode.x * camera.k - boxW - 12 : preferRight;
+        composerStyle = {
+          left: clamp(left, 8, Math.max(8, wrapW - boxW - 8)),
+          top: clamp(camera.y + composerNode.y * camera.k, 8, Math.max(8, wrapH - 210)),
+        };
+      }
+
       return h(
         'div',
         {
@@ -1920,7 +2225,21 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           ref: wrapRef,
           'data-panning': panning,
           'data-dragging': draggingNode,
-          onContextMenu: (event) => event.preventDefault(),
+          onContextMenu: (event) => {
+            event.preventDefault();
+            const target = event.target;
+            const nodeEl = target && typeof target.closest === 'function' ? target.closest('.mc-node') : null;
+            if (!nodeEl) {
+              setMenu(null);
+              return;
+            }
+            const id = nodeEl.getAttribute('data-node-id');
+            if (!id) return;
+            const wrap = wrapRef.current;
+            const rect = wrap && typeof wrap.getBoundingClientRect === 'function' ? wrap.getBoundingClientRect() : { left: 0, top: 0 };
+            setComposer(null);
+            setMenu({ id, x: event.clientX - rect.left, y: event.clientY - rect.top });
+          },
           onPointerDown,
           onPointerMove,
           onPointerUp: endDrag,
@@ -1940,6 +2259,8 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                     className: 'mc-edge',
                     'data-live': edge.live ? 'true' : 'false',
                     'data-active': edge.from === selectedId || edge.to === selectedId ? 'true' : 'false',
+                    'data-from': edge.from,
+                    'data-to': edge.to,
                     d: edgeStyle === 'ortho' ? edge.ortho : edge.d,
                   }),
                 ),
@@ -1958,6 +2279,122 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                 }),
               ),
             ),
+        menu && menuNode
+          ? h(
+              'div',
+              { className: 'mc-menu', style: menuStyle, role: 'menu', onPointerDown: (event) => event.stopPropagation(), onContextMenu: (event) => event.preventDefault() },
+              h('div', { className: 'mc-menuHead', title: menuNode.view.title }, menuNode.view.title),
+              h(
+                'button',
+                { type: 'button', className: 'mc-menuItem', role: 'menuitem', onClick: () => openComposer(menu.id, 'ask') },
+                t('menu.continue'),
+                h('span', { className: 'mc-menuKey' }, '↵'),
+              ),
+              h('button', { type: 'button', className: 'mc-menuItem', role: 'menuitem', onClick: () => openTrail(menu.id) }, t('menu.trail')),
+              typeof onRename === 'function'
+                ? h('button', { type: 'button', className: 'mc-menuItem', role: 'menuitem', onClick: () => openComposer(menu.id, 'rename') }, t('menu.rename'))
+                : null,
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'mc-menuItem',
+                  role: 'menuitem',
+                  'data-tone': 'quiet',
+                  onClick: () => {
+                    const id = menu.id;
+                    setMenu(null);
+                    onOpen(id);
+                  },
+                },
+                t('menu.open'),
+                h('span', { className: 'mc-menuKey' }, 'o'),
+              ),
+            )
+          : null,
+        trail
+          ? h(
+              'div',
+              { className: 'mc-trail', role: 'dialog', 'aria-label': t('trail.title'), onPointerDown: (event) => event.stopPropagation(), onContextMenu: (event) => event.preventDefault() },
+              h(
+                'div',
+                { className: 'mc-trailHead' },
+                h('span', { className: 'mc-trailTitle', title: trail.title }, `${t('trail.title')} · ${trail.title}`),
+                h('button', { type: 'button', className: 'mc-btn', onClick: () => setTrail(null), title: t('action.close'), 'aria-label': t('action.close') }, '✕'),
+              ),
+              h(
+                'div',
+                { className: 'mc-trailBody' },
+                trail.status === 'loading' ? h('div', { className: 'mc-trailNote' }, t('trail.loading')) : null,
+                trail.status === 'error' ? h('div', { className: 'mc-trailNote', 'data-tone': 'err' }, `${t('drawer.previewError')}: ${trail.error}`) : null,
+                trail.status === 'ready' && trail.rows.length === 0 ? h('div', { className: 'mc-trailNote' }, t('trail.empty')) : null,
+                trail.status === 'ready'
+                  ? trail.rows.map((row, index) =>
+                      h(
+                        'div',
+                        { className: 'mc-trailRow', 'data-kind': row.kind, key: `${index}:${row.kind}:${row.at}` },
+                        h('span', { className: 'mc-trailKind' }, t(`trail.kind.${row.kind}`)),
+                        h('span', { className: 'mc-trailText', title: row.text }, row.text),
+                        row.at > 0 ? h('span', { className: 'mc-trailTime' }, relLabel(Math.max(0, now - row.at), t)) : null,
+                      ),
+                    )
+                  : null,
+                h('div', { className: 'mc-trailNote' }, t('trail.note')),
+              ),
+            )
+          : null,
+        composer && composerNode
+          ? h(
+              'div',
+              { className: 'mc-composer', style: composerStyle, role: 'dialog', 'aria-label': t('composer.askHead'), onPointerDown: (event) => event.stopPropagation(), onContextMenu: (event) => event.preventDefault() },
+              h(
+                'div',
+                { className: 'mc-composerHead' },
+                h('span', null, composer.mode === 'rename' ? t('composer.renameHead') : t('composer.askHead')),
+                h('span', { title: composerNode.view.title }, composerNode.view.title),
+              ),
+              composer.mode === 'rename'
+                ? h('input', {
+                    className: 'mc-composerInput',
+                    style: { minHeight: 0, height: 32 },
+                    value: composer.text,
+                    autoFocus: true,
+                    spellCheck: false,
+                    onChange: (event) => setComposer((previous) => (previous ? { ...previous, text: event.target.value, status: 'idle', error: '' } : previous)),
+                    onKeyDown: composerKeyDown,
+                  })
+                : h('textarea', {
+                    className: 'mc-composerInput',
+                    value: composer.text,
+                    autoFocus: true,
+                    placeholder: t('composer.placeholder'),
+                    onChange: (event) => setComposer((previous) => (previous ? { ...previous, text: event.target.value, status: previous.status === 'sent' ? 'idle' : previous.status, error: '' } : previous)),
+                    onKeyDown: composerKeyDown,
+                  }),
+              composer.error ? h('div', { className: 'mc-composerNote', 'data-tone': 'err' }, composer.error) : null,
+              composer.status === 'sent' ? h('div', { className: 'mc-composerNote', 'data-tone': 'ok' }, composer.mode === 'rename' ? t('composer.renamed') : t('composer.sent')) : null,
+              h(
+                'div',
+                { className: 'mc-composerFoot' },
+                h('span', { className: 'mc-composerHint' }, composer.mode === 'rename' ? t('composer.renameHint') : t('composer.hint')),
+                composer.mode === 'ask' ? h('span', { className: 'mc-composerNote', style: { flex: 'none' } }, t('composer.modeQueue')) : null,
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'mc-btn mc-primary',
+                    disabled: composer.status === 'sending' || composer.text.trim() === '',
+                    onClick: submitComposer,
+                  },
+                  composer.mode === 'rename'
+                    ? t('composer.save')
+                    : composer.status === 'sending'
+                      ? t('composer.sending')
+                      : t('composer.send'),
+                ),
+              ),
+            )
+          : null,
         h(
           'div',
           { className: 'mc-canvasOptions' },
@@ -3028,6 +3465,9 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                       focus: canvasFocus,
                       fitRef: canvasFitRef,
                       onDropFile,
+                      onAsk: props.askSession,
+                      onRename: props.renameSession,
+                      onTrail: props.readSessionTrail,
                     }),
         ),
         selected
@@ -3177,12 +3617,54 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
           }
           await session.openWorkspacePath({ path: target });
         },
+        /**
+         * Send a plain question to one session. `queue` appends after the running
+         * turn (never interrupts); the request is idempotent per `requestId`.
+         */
+        askSession: async (sessionId, text, requestId) => {
+          const sessions = ctx.sessions;
+          if (!sessions || typeof sessions.using !== 'function') throw new Error('sessions service unavailable');
+          const result = await sessions.using(sessionId, { source: 'mission-control' }, (reference) => {
+            const session = reference && reference.binding && reference.binding.session;
+            if (!session || typeof session.prompt !== 'function') throw new Error('session prompt unavailable');
+            const snapshot = typeof session.getSnapshot === 'function' ? session.getSnapshot() : undefined;
+            if (snapshot && snapshot.openState === 'error') {
+              const detail = snapshot.openError && (snapshot.openError.message || snapshot.openError.code);
+              throw new Error(detail ? String(detail) : 'session failed to open');
+            }
+            return session.prompt([{ type: 'text', text }], 'queue', undefined, requestId);
+          });
+          return remoteValue(result);
+        },
+        /** Rename one session (host resumes it first; the new title is durable). */
+        renameSession: async (sessionId, title) => {
+          const sessions = ctx.sessions;
+          if (!sessions || typeof sessions.using !== 'function') throw new Error('sessions service unavailable');
+          const result = await sessions.using(sessionId, { source: 'mission-control' }, (reference) => {
+            const session = reference && reference.binding && reference.binding.session;
+            if (!session || typeof session.rename !== 'function') throw new Error('session rename unavailable');
+            return session.rename(title);
+          });
+          return remoteValue(result);
+        },
+        /** Compact recent-work trail from the session's already-loaded event window. */
+        readSessionTrail: async (sessionId) => {
+          const sessions = ctx.sessions;
+          if (!sessions || typeof sessions.using !== 'function') throw new Error('sessions service unavailable');
+          return sessions.using(sessionId, { source: 'mission-control' }, (reference) => {
+            const source = reference && reference.binding && reference.binding.eventSource;
+            if (!source || typeof source.getSnapshot !== 'function') return [];
+            const snapshot = source.getSnapshot();
+            return trailRows(snapshot && snapshot.entries);
+          });
+        },
         deliverToSession: async (sessionId, text) => {
           const sessions = ctx.sessions;
           if (!sessions || typeof sessions.using !== 'function') throw new Error('sessions service unavailable');
-          await sessions.using(sessionId, { source: 'mission-control' }, (reference) =>
+          const result = await sessions.using(sessionId, { source: 'mission-control' }, (reference) =>
             reference.binding.session.prompt([{ type: 'text', text }], 'queue'),
           );
+          return remoteValue(result);
         },
       };
 

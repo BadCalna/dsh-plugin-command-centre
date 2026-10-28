@@ -58,9 +58,17 @@
   起步同帧、快速拖动时轻微拖尾、松手收一下再落定（拖尾上限 26px，不会散架；`prefers-reduced-motion` 下改为刚性平移）；
   空白处拖拽平移、**滚轮直接缩放**、Shift+滚轮平移、`0` 适配全图；
   只画节点和连线：不再套「根子树」分组框和重复标题（标题就在节点里，从属关系看连线 + `主/子` 标记）；
+  节点是**圆角矩形**；**连线端点会自动选边**（按两个节点的相对位置挑最近的父/子边，端点沿边滑向对方，
+  多子节点自然分叉，不再固定钉在卡片右侧），拖动节点到任意方位都会重新选边；
   连线加粗并带主题强调色，选中节点的上下游连线会高亮发光；
   从看板卡片右上角 `⌗` 进入会自动 fit 到该任务的子树。子树范围按**当前选中节点**往下取；
   布局选择与手动位置存 `localStorage`（`dsh.command-centre.canvas.v1`），刷新/重启保持
+- **画布右键节点**：`继续对话` / `查看工作轨迹` / `修改标题` / `打开对话`
+  - **继续对话**：就在节点旁弹一个输入框，`Enter` 发送（`queue` 模式，排到下一轮、不打断正在跑的回合），
+    每次草稿带 `requestId`，重复点不会重复投递；发完显示「已排队，下一轮送到」
+  - **查看工作轨迹**：右侧弹出该会话最近的动作流（回合分隔、工具调用 + 文件/命令、回答摘要、交付物、工具错误），
+    数据来自会话**已加载的事件窗口**（冷会话也能读，不唤醒 Agent）；只覆盖最近窗口，不是全量历史
+  - **修改标题**：走宿主 `session.rename`（durable、进会话日志）；注意宿主会先 resume 这个会话
 - **过滤**：搜索、工作区下拉、全部 / 只看活跃 / 只看待你
 - **安静模式**（`s`）：降饱和，长时间盯屏不刺眼
 
@@ -121,6 +129,10 @@ link:/absolute/path/to/dsh-plugin-command-centre
 - **投递没有撤销**：发出去就是一条排队消息，取消请到目标会话里删
 - **文件预览是面板内的**，不是宿主右栏的原生预览面板（宿主没暴露打开它的 Client API）
 - 只看所有工作区（可下拉过滤；「只看当前工作区」需要宿主暴露当前工作区，暂缺）
+- **工作轨迹只是最近窗口**：首屏历史按「≥50 条消息 / ≥2 回合、上限 500」加载，更早的要 `loadOlder()`；
+  也不支持「跳到某一条消息」（宿主没有暴露 anchor/seq 深链），只能先打开对话
+- **改标题会唤醒会话**：宿主 rename 前会 resume 冷会话；子 agent 会话/被别的 writer 占住时会返回宿主错误
+- **继续对话对子会话有限制**：one-shot 子会话只读、归档会话发进去可能被 gate 成 blocked（宿主行为，插件只显示错误）
 
 ## 数据来源
 
@@ -137,6 +149,8 @@ link:/absolute/path/to/dsh-plugin-command-centre
 | 子 agent 目录 / 时长 | 投影 `subagentCatalog` / `subagentTiming` |
 | 目标 / 团队 | 投影 `goal` / `agentTeam` |
 | 交付物（脚本生成也算） | Host 投影 `missionControl.deliverables`，fold 会话日志的 `deliverables/presented` |
+| 工作轨迹（最近动作） | `sessions.using(id, …, ref => ref.binding.eventSource.getSnapshot().entries)`，按 turn/tool/回答/交付折叠 |
+| 改标题 | `sessions.using(id, …, ref => ref.binding.session.rename(title))` → `remote.session.rename` |
 
 冷会话投影用 `ctx.sessions.refreshProjections(id)` 拉一次（不 retain、不开流）。
 

@@ -157,7 +157,29 @@ const ctx = {
       return () => {};
     },
   },
-  sessions: { refreshProjections: () => Promise.resolve() },
+  sessions: {
+    refreshProjections: () => Promise.resolve(),
+    using: async (_id, _options, callback) =>
+      callback({
+        binding: {
+          session: {
+            rename: async (title) => ({ ok: true, value: { title, seq: 9 } }),
+            getSnapshot: () => ({ openState: 'open' }),
+            prompt: async () => ({ ok: true, value: { accepted: true } }),
+          },
+          eventSource: {
+            getSnapshot: () => ({
+              entries: [
+                { type: 'event', event: { type: 'turn/start', seq: 1, time: 1, data: { turn: 3 } } },
+                { type: 'event', event: { type: 'tool/call', seq: 2, time: 2, data: { turn: 3, step: 1, callId: 'c1', name: 'write', arguments: '{"file_path":"/w/deck.mjs"}' } } },
+                { type: 'event', event: { type: 'assistant/message', seq: 3, time: 3, data: { turn: 3, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '第 7 页改好了' }] } } } },
+                { type: 'event', event: { type: 'deliverables/presented', seq: 4, time: 4, data: { turn: 3, files: [{ path: '/w/输出/deck.pptx' }] } } },
+              ],
+            }),
+          },
+        },
+      }),
+  },
   inject: (deps, callback) => {
     injectedDeps.push(Array.isArray(deps) ? deps.join(',') : String(deps));
     return callback({
@@ -481,6 +503,9 @@ function expand(node) {
 
 hookState = [];
 resetHooks();
+const asked = [];
+const renamed = [];
+const trailReads = [];
 const panelProps = {
   t: (key) => flatLookup(dictionaries.dicts.zh, String(key)),
   useSessions: (selector) => selector(list),
@@ -491,6 +516,22 @@ const panelProps = {
   deliverToSession: (id, text) => {
     delivered.push({ id, text });
     return Promise.resolve({ accepted: true });
+  },
+  askSession: (id, text, requestId) => {
+    asked.push({ id, text, requestId });
+    return Promise.resolve({ accepted: true });
+  },
+  renameSession: (id, title) => {
+    renamed.push({ id, title });
+    return Promise.resolve({ title, seq: 9 });
+  },
+  readSessionTrail: (id) => {
+    trailReads.push(id);
+    return Promise.resolve([
+      { kind: 'turn', text: 'T3', at: Date.now() - 60000 },
+      { kind: 'tool', text: 'write · /w/deck.mjs', at: Date.now() - 50000 },
+      { kind: 'deliver', text: 'deck.pptx', at: Date.now() - 40000 },
+    ]);
   },
 };
 
@@ -742,9 +783,101 @@ dragCanvas.props.onPointerUp(pointerEvent({ clientX: 200, clientY: 200 }));
 tree = expandPanel();
 assert(countClass(tree, 'mc-drawer') === 1, 'a click without movement still selects the node');
 
+// ---- right-click menu + node composer (continue conversation) ----
+function menuButton(label) {
+  return findFirst(tree, (node) => node.type === 'button' && node.props && node.props.className === 'mc-menuItem' && node.children && node.children[0] === label);
+}
+const canvasForMenu = canvasElement(tree);
+assert(canvasForMenu, 'canvas element present for the context menu');
+canvasForMenu.props.onContextMenu({
+  preventDefault() {},
+  clientX: 120,
+  clientY: 140,
+  target: { closest: (selector) => (selector === '.mc-node' ? { getAttribute: () => 'a' } : null) },
+});
+tree = expandPanel();
+assert(countClass(tree, 'mc-menu') === 1, 'right-clicking a node opens the context menu');
+assert(render(tree).includes('查看工作轨迹'), 'the menu offers the work-trail entry');
+const continueButton = menuButton('继续对话');
+assert(continueButton, 'the menu offers continue-conversation');
+continueButton.props.onClick(fakeEvent);
+tree = expandPanel();
+assert(countClass(tree, 'mc-menu') === 0, 'picking an item closes the menu');
+assert(countClass(tree, 'mc-composer') === 1, 'continue-conversation opens the node composer');
+const composerInput = findFirst(tree, (node) => node.type === 'textarea');
+assert(composerInput, 'the composer has a textarea');
+composerInput.props.onChange({ target: { value: '第 7 页再调一下颜色' } });
+tree = expandPanel();
+const composerSend = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === '发送');
+assert(composerSend, 'the composer has a send button');
+composerSend.props.onClick(fakeEvent);
+
 // The preview reads through a promise: settle it before the last assertions.
 (async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // pageProps: the host-facing rename + trail implementations
+  const hostProps = main.options.inject();
+  const renamedResult = await hostProps.renameSession('a', '新名字');
+  assert(renamedResult && renamedResult.title === '新名字', 'renameSession unwraps the RemoteResult envelope');
+  const hostTrail = await hostProps.readSessionTrail('a');
+  assert(hostTrail.length === 4, 'readSessionTrail folds the loaded event window');
+  assert(hostTrail[1].kind === 'tool' && hostTrail[1].text.startsWith('write'), 'the trail labels a tool call with its file');
+  assert(hostTrail[3].kind === 'deliver' && hostTrail[3].text === 'deck.pptx', 'the trail shows a delivered artifact');
+
+  assert(asked.length === 1, 'the composer sent exactly one prompt');
+  assert(asked[0].id === 'a' && asked[0].text === '第 7 页再调一下颜色', 'the prompt targets the right-clicked node with the typed text');
+  assert(typeof asked[0].requestId === 'string' && asked[0].requestId.length > 0, 'the prompt carries an idempotent request id');
+  const afterSend = render(expandPanel());
+  assert(afterSend.includes('已排队，下一轮送到'), 'the composer reports the queued prompt');
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+// ---- work trail + rename from the same menu ----
+const canvasForTrail = canvasElement(tree);
+canvasForTrail.props.onContextMenu({
+  preventDefault() {},
+  clientX: 120,
+  clientY: 140,
+  target: { closest: (selector) => (selector === '.mc-node' ? { getAttribute: () => 'a' } : null) },
+});
+tree = expandPanel();
+const trailItem = menuButton('查看工作轨迹');
+assert(trailItem, 'the menu offers the work trail');
+trailItem.props.onClick(fakeEvent);
+tree = expandPanel();
+assert(countClass(tree, 'mc-trail') === 1, 'the work-trail panel opens');
+const renameItem0 = menuButton('修改标题');
+assert(!renameItem0, 'the menu closed behind the trail panel');
+
+// rename: right-click again, pick 修改标题, retitle, send
+canvasForTrail.props.onContextMenu({
+  preventDefault() {},
+  clientX: 120,
+  clientY: 140,
+  target: { closest: (selector) => (selector === '.mc-node' ? { getAttribute: () => 'a' } : null) },
+});
+tree = expandPanel();
+const renameItem = menuButton('修改标题');
+assert(renameItem, 'the menu offers rename when the host exposes it');
+renameItem.props.onClick(fakeEvent);
+tree = expandPanel();
+assert(countClass(tree, 'mc-composer') === 1, 'rename opens the composer');
+const renameInput = findFirst(tree, (node) => node.type === 'input' && node.props && node.props.className === 'mc-composerInput');
+assert(renameInput, 'rename uses a single-line input');
+renameInput.props.onChange({ target: { value: '修复登录超时 · 回归' } });
+tree = expandPanel();
+const renameSend = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === '保存');
+assert(renameSend, 'rename has a save button');
+renameSend.props.onClick(fakeEvent);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const afterTrail = render(expandPanel());
+  assert(trailReads.length === 1 && trailReads[0] === 'a', 'the trail read targets the right-clicked node');
+  assert(afterTrail.includes('write · /w/deck.mjs') && afterTrail.includes('deck.pptx'), 'the trail renders tool and delivery rows');
+  assert(renamed.length === 1 && renamed[0].id === 'a' && renamed[0].title === '修复登录超时 · 回归', 'rename sends the new title to the host');
+  assert(render(expandPanel()).includes('标题已更新'), 'rename reports success');
 
   // Preview remotes: unwrap the RemoteResult envelope, error codes surface, and
   // "open on desktop" resolves the workspace-relative path through stat first.

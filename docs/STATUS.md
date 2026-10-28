@@ -1,6 +1,6 @@
 # STATUS — Command Centre
 
-> 最后更新：2026-10-27 · v0.9.2（画布子树拖拽 + 交付物投影 + 文件预览修复）。
+> 最后更新：2026-10-28 · v0.9.3（画布端点智能选边 + 圆角节点 + 节点右键菜单/继续对话/工作轨迹/改名）。
 
 ## 现在是什么状态
 
@@ -39,6 +39,16 @@
     （Host 按自己的 cwd 解析相对路径，传相对路径会失败）；
     ④ 新增 `scripts/smoke-host.mjs` 覆盖投影 fold；Client 冒烟补：远程命名空间注入、信封解包、
     stat 绝对化、交付物渲染、画布子树弹簧拖拽
+  - `v0.9.3` ① 连线**端点智能选边**：按两节点相对位置选最近的父/子边，端点沿边滑向对方（多子节点分叉），
+    不再固定右/下侧；曲线与直角都按新端点重算（`edgeSides`/`sideAnchor`/`edgeGeometry`，edge 加 `data-from/to`）；
+    节点改**圆角矩形**（10px）；
+    ② 画布节点**右键菜单**：继续对话 / 查看工作轨迹 / 修改标题 / 打开对话；
+    ③ 继续对话 = 节点旁 composer，`binding.session.prompt(text,'queue',undefined,requestId)`（不打断、幂等），
+    走 `sessions.using` + `openState==='error'` 守卫，结果按 `{ok,value}` 解包；
+    ④ 修改标题 = `binding.session.rename(title)`（宿主 `session/rename`，durable；会先 resume 会话）；
+    ⑤ 工作轨迹 = 折叠已加载的 `eventSource` 窗口（turn/tool/回答/交付/错误，最多 40 行），
+    冷会话可读、不唤醒 Agent，仅覆盖最近窗口；
+    ⑥ 冒烟补：菜单开关、composer 发送/幂等 id、改名、轨迹折叠与渲染
 
 ## 关键结论 / 踩过的坑
 
@@ -79,6 +89,9 @@ Client 用它做产出列（`2F`/`TXT`/`ERR`）、抽屉「文件区 + 对话区
 - 刷新回对话页（宿主 layout 不持久化 `activePanelId`）→ `⌘⇧P`
 - 不支持拖拽改状态（状态来自宿主投影）
 - 只看所有工作区（Q4「只看当前工作区」缺宿主侧"当前工作区"信号）
+- 工作轨迹只读已加载窗口（tail），不能跳到某条消息（宿主无 anchor 深链）；全量历史要 loadOlder 循环
+- 改名会 resume 会话（冷会话变 live、拿 writer 锁）；子会话/归档由宿主行为决定
+- 继续对话对 one-shot 子会话/归档会话可能被宿主拒绝，插件只显示错误
 - 没做批准/回答/打断（Q3 只读；V2 动作通道）
 - 未发布 npm（GitHub 安装即可；npm 上 `dsh-plugin-command-centre` 名字可用）
 
