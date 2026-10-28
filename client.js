@@ -20,8 +20,10 @@ window.__ModuleLoader__.load({
 
     const NS = 'missionControl';
     const PANEL_ID = 'mission';
-    const REFRESH_CONCURRENCY = 4;
-    const REFRESH_LIMIT = 80;
+    // Cold-session projections are read on demand: the first few cards so the board is
+    // populated, plus whatever the user selects. A mount-wide sweep (the old 80-session
+    // limit) made the Host load every cold session log at once whenever the panel opened.
+    const REFRESH_EAGER = 8;
 
     // #region dictionaries
     const ZH = {
@@ -131,6 +133,10 @@ window.__ModuleLoader__.load({
         defaultView: '默认界面',
         quiet: '安静模式默认开启',
         restoreView: '记住上次界面',
+        theme: '主题',
+        themeSystem: '跟随系统',
+        themeLight: '亮',
+        themeDark: '暗',
         hint: '画布的默认方向 / 连线 / 位置在画布左上角与拖动时自动保存',
         on: '开',
         off: '关',
@@ -165,6 +171,7 @@ window.__ModuleLoader__.load({
         loading: '读取中…',
         empty: '最近窗口里还没有动作',
         note: '仅显示最近加载的事件窗口（不含更早的历史）',
+        nativeOff: '原生轨迹视图未开启：在 设置 → 通用 里打开「显示代码工作视图」，就能从对话上方的「轨迹」标签查看（这里是插件内的紧凑版）',
         kind: { turn: '回合', tool: '工具', say: '回答', deliver: '交付', error: '错误' },
         close: '关闭',
       },
@@ -302,6 +309,10 @@ window.__ModuleLoader__.load({
         defaultView: 'Default view',
         quiet: 'Quiet mode by default',
         restoreView: 'Remember the last view',
+        theme: 'Theme',
+        themeSystem: 'System',
+        themeLight: 'Light',
+        themeDark: 'Dark',
         hint: 'Canvas direction, edge style and node positions save from the canvas itself',
         on: 'on',
         off: 'off',
@@ -336,6 +347,7 @@ window.__ModuleLoader__.load({
         loading: 'Loading…',
         empty: 'No activity in the loaded window yet',
         note: 'Only the most recent event window is shown, not the full history',
+        nativeOff: 'The native Trajectory view is off: enable "Show coding view" in Settings → General to use the Trajectory tab in the conversation (this is the compact in-panel version)',
         kind: { turn: 'turn', tool: 'tool', say: 'reply', deliver: 'deliver', error: 'error' },
         close: 'Close',
       },
@@ -437,6 +449,62 @@ window.__ModuleLoader__.load({
         .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1$2')
         .replace(/`([^`]+)`/g, '$1')
         .trim();
+    }
+
+    /** Whatever the Host's current theme is, as a boolean. */
+    function hostPrefersDark() {
+      try {
+        if (typeof document !== 'undefined' && document.body) return document.body.hasAttribute('data-ds-dark-theme');
+      } catch {
+        /* detached document */
+      }
+      return false;
+    }
+
+    /** True when a keystroke landed in a text field (ours or a host one we host). */
+    function isEditableTarget(target) {
+      if (!target || typeof target !== 'object') return false;
+      const tag = typeof target.tagName === 'string' ? target.tagName.toUpperCase() : '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+        if (tag === 'INPUT') {
+          const type = typeof target.type === 'string' ? target.type.toLowerCase() : 'text';
+          return ['button', 'checkbox', 'radio', 'submit', 'reset', 'file', 'range', 'color'].indexOf(type) < 0;
+        }
+        return true;
+      }
+      if (target.isContentEditable === true) return true;
+      try {
+        if (typeof target.closest === 'function') return target.closest('input,textarea,select,[contenteditable=""],[contenteditable="true"]') !== null;
+      } catch {
+        /* detached/hostile target: not editable as far as we can tell */
+      }
+      return false;
+    }
+
+    /** True while an IME is composing: React's synthetic KeyboardEvent drops isComposing. */
+    function isImeComposing(event) {
+      if (!event) return false;
+      const native = event.nativeEvent || event;
+      return native.isComposing === true || native.keyCode === 229 || event.key === 'Process' || event.keyCode === 229;
+    }
+
+    /** A keydown that must not be interpreted as a shortcut: edited text or IME composition. */
+    function isTypingEvent(event) {
+      if (!event) return false;
+      if (isImeComposing(event)) return true;
+      const native = event.nativeEvent || event;
+      return isEditableTarget(native.target || event.target);
+    }
+
+    /**
+     * Our own inputs swallow plain keystrokes so neither our hotkeys nor a host
+     * single-key binding fires while the user types. Modified chords are left alone
+     * so real shortcuts (⌘/Ctrl/Alt + key) still reach the Host.
+     */
+    function stopTypingKeys(event) {
+      if (!event) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (typeof event.stopPropagation === 'function') event.stopPropagation();
     }
 
     let draggedFilePath = null;
@@ -871,7 +939,19 @@ window.__ModuleLoader__.load({
   background-image:linear-gradient(180deg,var(--cc-tint),transparent 240px),linear-gradient(var(--cc-grid) 1px,transparent 1px),linear-gradient(90deg,var(--cc-grid) 1px,transparent 1px),repeating-linear-gradient(0deg,var(--cc-scan) 0 1px,transparent 1px 3px);
   background-size:100% 100%,48px 48px,48px 48px,100% 3px;background-attachment:local;
 }
-body[data-ds-dark-theme] .mc-root{--cc-accent:#57e2ff;--cc-accent-ink:#57e2ff;--cc-grid:rgba(96,208,255,.055);--cc-scan:rgba(255,255,255,.018);--cc-tint:rgba(87,226,255,.06);--cc-glow:rgba(87,226,255,.3);--cc-vignette:rgba(0,0,0,.55);--cc-ink-run:var(--mc-run);--cc-ink-warn:var(--mc-warn);--cc-ink-ok:var(--mc-ok);--cc-ink-err:var(--mc-err)}
+.mc-root[data-tone=dark]{--dsw-alias-bg-base:#0a1014;--dsw-alias-bg-layer-1:#0e161a;--dsw-alias-bg-layer-2:#121c20;--dsw-alias-bg-layer-3:#18242a;
+  --dsw-alias-border-l3:#22323a;--dsw-alias-border-l4:#30444d;
+  --dsw-alias-label-primary:#dcebf0;--dsw-alias-label-secondary:#9eb6bf;--dsw-alias-label-tertiary:#6a828b;
+  --dsw-alias-state-business-primary:#57e2ff;--dsw-alias-state-error-primary:#ff6b6b;--dsw-alias-state-idle-primary:#6a828b;
+  --dsw-alias-state-success-secondary:#3ddc84;--dsw-alias-state-warn-primary:#f0b429;
+  --dsw-focus-ring-color:#57e2ff;
+  --cc-accent:#57e2ff;--cc-accent-ink:#8beaff;--cc-grid:rgba(96,208,255,.055);--cc-scan:rgba(255,255,255,.018);--cc-tint:rgba(87,226,255,.06);--cc-glow:rgba(87,226,255,.3);--cc-vignette:rgba(0,0,0,.55);--cc-ink-run:var(--mc-run);--cc-ink-warn:var(--mc-warn);--cc-ink-ok:var(--mc-ok);--cc-ink-err:var(--mc-err)}
+.mc-root[data-tone=light]{--dsw-alias-bg-base:#fbfcfd;--dsw-alias-bg-layer-1:#f4f6f8;--dsw-alias-bg-layer-2:#ffffff;--dsw-alias-bg-layer-3:#eceff2;
+  --dsw-alias-border-l3:#e2e6ea;--dsw-alias-border-l4:#d5dade;
+  --dsw-alias-label-primary:#1d232a;--dsw-alias-label-secondary:#55606b;--dsw-alias-label-tertiary:#8b949e;
+  --dsw-alias-state-business-primary:#2f7de1;--dsw-alias-state-error-primary:#d14343;--dsw-alias-state-idle-primary:#9aa4ae;
+  --dsw-alias-state-success-secondary:#2f9e63;--dsw-alias-state-warn-primary:#c98a00;
+  --dsw-focus-ring-color:#2f7de1}
 .mc-root.mc-quiet{--mc-run:var(--dsw-alias-label-secondary);--mc-warn:var(--dsw-alias-label-secondary);--mc-ok:var(--dsw-alias-label-secondary);--cc-glow:transparent}
 .mc-root>*{position:relative;z-index:1}
 .mc-root::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.5;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.04'/%3E%3C/svg%3E")}
@@ -887,8 +967,7 @@ html[data-platform=darwin] .mc-head{padding-top:calc(10px + var(--dsh-frame-top-
 .mc-titleMark{flex:none;display:inline-flex;color:var(--cc-accent)}
 .mc-title{margin:0;font-family:var(--mc-mono);font-size:13px;font-weight:600;line-height:20px;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap;font-variant-numeric:tabular-nums slashed-zero;font-feature-settings:"zero" 1,"tnum" 1}
 .mc-titleMark svg{display:block}
-html:not([data-ds-dark-theme]) .mc-title{text-shadow:none}
-body[data-ds-dark-theme] .mc-title{text-shadow:0 0 18px color-mix(in srgb,var(--cc-accent) 24%,transparent)}
+.mc-root[data-tone=dark] .mc-title{text-shadow:0 0 18px color-mix(in srgb,var(--cc-accent) 24%,transparent)}
 .mc-telemetry{display:flex;align-items:stretch;gap:2px}
 .mc-stat{display:flex;flex-direction:column;align-items:flex-start;gap:0;min-width:52px;padding:2px 10px 3px;border:0;border-bottom:1px solid var(--cc-hair);background:transparent}
 .mc-stat[data-tone=run]{border-bottom-color:color-mix(in srgb,var(--mc-run) 60%,var(--cc-hair))}
@@ -971,7 +1050,7 @@ body[data-ds-dark-theme] .mc-title{text-shadow:0 0 18px color-mix(in srgb,var(--
 .mc-card[data-selected=true]{border-color:var(--cc-accent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cc-accent) 30%,transparent)}
 .mc-cardTop{display:flex;align-items:flex-start;gap:7px;min-width:0}
 .mc-cardTitle{flex:1 1 auto;min-width:0;font-size:13px;font-weight:600;line-height:18px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-body[data-ds-dark-theme] .mc-card[data-state=running] .mc-cardTitle{text-shadow:0 0 12px color-mix(in srgb,var(--mc-run) 20%,transparent)}
+.mc-root[data-tone=dark] .mc-card[data-state=running] .mc-cardTitle{text-shadow:0 0 12px color-mix(in srgb,var(--mc-run) 20%,transparent)}
 .mc-cardSub{color:var(--dsw-alias-label-tertiary);font-size:10px;line-height:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mc-mono);letter-spacing:.08em;text-transform:uppercase}
 .mc-cardMetrics{display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mc-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}
 .mc-metric{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
@@ -1814,7 +1893,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
     }
 
     function Canvas(props) {
-      const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef, onDropFile, onAsk, onRename, onTrail } = props;
+      const { groups, model, t, now, selectedId, onSelect, onOpen, focus, fitRef, onDropFile, onAsk, onRename, onTrail, onOpenNativeTrail } = props;
       const stored = React.useMemo(() => readLocalCanvasPrefs(), []);
       const [direction, setDirection] = React.useState(stored && stored.direction === 'lr' ? 'lr' : 'tb');
 
@@ -1873,7 +1952,23 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         const node = layout.byId.get(id);
         setMenu(null);
         setComposer(null);
-        setTrail({ id, title: node ? node.view.title : '', rows: [], status: 'loading', error: '' });
+        // The Host's native Trajectory view is nicer than our compact fold: navigate
+        // there when this deployment exposes it, and only fall back to the panel.
+        let nativeReason = '';
+        if (typeof onOpenNativeTrail === 'function') {
+          let native;
+          try {
+            native = onOpenNativeTrail(id);
+          } catch (error) {
+            native = { ok: false, reason: error && error.message ? String(error.message) : 'failed' };
+          }
+          if (native && native.ok) {
+            setTrail(null);
+            return;
+          }
+          nativeReason = native && native.reason ? String(native.reason) : 'unavailable';
+        }
+        setTrail({ id, title: node ? node.view.title : '', rows: [], status: 'loading', error: '', nativeReason });
         Promise.resolve()
           .then(() => (typeof onTrail === 'function' ? onTrail(id) : []))
           .then((rows) => setTrail((previous) => (previous && previous.id === id ? { ...previous, rows: Array.isArray(rows) ? rows : [], status: 'ready' } : previous)))
@@ -1923,6 +2018,8 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       };
 
       const composerKeyDown = (event) => {
+        stopTypingKeys(event);
+        if (isImeComposing(event)) return;
         if (event.key === 'Escape') {
           event.preventDefault();
           setComposer(null);
@@ -1938,7 +2035,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         if (!menu && !composer) return undefined;
         if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined;
         const onKeyDown = (event) => {
-          if (event.key !== 'Escape') return;
+          if (event.key !== 'Escape' || isTypingEvent(event)) return;
           setMenu(null);
           setComposer(null);
           setTrail(null);
@@ -2338,6 +2435,9 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                         row.at > 0 ? h('span', { className: 'mc-trailTime' }, relLabel(Math.max(0, now - row.at), t)) : null,
                       ),
                     )
+                  : null,
+                trail.nativeReason
+                  ? h('div', { className: 'mc-trailNote', 'data-tone': trail.nativeReason === 'devtools-off' ? 'err' : undefined }, t('trail.nativeOff'))
                   : null,
                 h('div', { className: 'mc-trailNote' }, t('trail.note')),
               ),
@@ -2961,6 +3061,31 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
             ),
           ),
           row(
+            t('settings.theme'),
+            h(
+              'div',
+              { className: 'mc-seg', role: 'group', 'aria-label': t('settings.theme') },
+              [
+                ['system', t('settings.themeSystem')],
+                ['light', t('settings.themeLight')],
+                ['dark', t('settings.themeDark')],
+              ].map(([value, label]) =>
+                h(
+                  'button',
+                  {
+                    key: value,
+                    type: 'button',
+                    className: 'mc-segBtn',
+                    'data-testid': `mc-theme-${value}`,
+                    'aria-pressed': (settings.theme || 'system') === value ? 'true' : 'false',
+                    onClick: () => onChange({ ...settings, theme: value }),
+                  },
+                  label,
+                ),
+              ),
+            ),
+          ),
+          row(
             t('settings.quiet'),
             h('button', { type: 'button', className: 'mc-btn', 'aria-pressed': settings.quiet ? 'true' : 'false', onClick: () => onChange({ ...settings, quiet: !settings.quiet }) }, settings.quiet ? t('settings.on') : t('settings.off')),
           ),
@@ -3113,7 +3238,8 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       const [canvasFocus, setCanvasFocus] = React.useState({ id: null, nonce: 0 });
       const [previewFile, setPreviewFile] = React.useState(null);
       const [settingsOpen, setSettingsOpen] = React.useState(false);
-      const [settings, setSettings] = React.useState({ defaultView: 'board', quiet: false, restoreView: false });
+      const [settings, setSettings] = React.useState({ defaultView: 'board', quiet: false, restoreView: false, theme: 'system' });
+      const [hostDark, setHostDark] = React.useState(hostPrefersDark);
       const [delivery, setDelivery] = React.useState(null);
       const viewTouchedRef = React.useRef(false);
       const canvasFitRef = React.useRef(null);
@@ -3128,6 +3254,17 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         return () => clearInterval(timer);
       }, []);
 
+      // Follow the Host theme live so "system" keeps working when the user flips it.
+      React.useEffect(() => {
+        if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return undefined;
+        const body = document.body;
+        if (!body) return undefined;
+        const observer = new MutationObserver(() => setHostDark(hostPrefersDark()));
+        observer.observe(body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] });
+        setHostDark(hostPrefersDark());
+        return () => observer.disconnect();
+      }, []);
+
       React.useEffect(() => {
         let alive = true;
         ensurePrefs().then((prefs) => {
@@ -3138,6 +3275,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
             defaultView: validView(stored.defaultView) ? stored.defaultView : 'board',
             quiet: stored.quiet === true,
             restoreView: stored.restoreView === true,
+            theme: stored.theme === 'light' || stored.theme === 'dark' ? stored.theme : 'system',
           };
           setSettings(next);
           setQuiet(next.quiet);
@@ -3227,35 +3365,39 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         [props.openSession],
       );
 
-      // Pull cold projection values once the list is ready, without retaining history.
-      React.useEffect(() => {
-        const refresh = props.refreshProjections;
-        if (typeof refresh !== 'function' || phase !== 'ready') return undefined;
-        let alive = true;
-        const ids = model.roots
-          .map((root) => root.id)
-          .filter((id) => {
-            if (requested.current.has(id)) return false;
+      // Pull cold projection values only where they are used (once per session).
+      const requestProjections = React.useCallback(
+        (ids) => {
+          const refresh = props.refreshProjections;
+          if (typeof refresh !== 'function') return;
+          const wanted = [];
+          for (const id of ids) {
+            if (typeof id !== 'string' || id === '' || requested.current.has(id)) continue;
             requested.current.add(id);
-            return true;
-          })
-          .slice(0, REFRESH_LIMIT);
-        (async () => {
-          for (let index = 0; index < ids.length && alive; index += REFRESH_CONCURRENCY) {
-            const chunk = ids.slice(index, index + REFRESH_CONCURRENCY);
-            await Promise.all(
-              chunk.map((id) =>
-                Promise.resolve()
-                  .then(() => refresh(id))
-                  .catch(() => undefined),
-              ),
-            );
+            wanted.push(id);
+            if (wanted.length >= REFRESH_EAGER) break;
           }
-        })();
-        return () => {
-          alive = false;
-        };
-      }, [phase, model, props.refreshProjections]);
+          if (wanted.length === 0) return;
+          for (const id of wanted) {
+            Promise.resolve()
+              .then(() => refresh(id))
+              .catch(() => undefined);
+          }
+        },
+        [props.refreshProjections],
+      );
+
+      React.useEffect(() => {
+        if (phase !== 'ready') return;
+        requestProjections(model.roots.slice(0, REFRESH_EAGER).map((root) => root.id));
+      }, [phase, model, requestProjections]);
+
+      React.useEffect(() => {
+        if (!selectedId) return;
+        const row = model.views.get(selectedId);
+        const ids = row ? [selectedId, ...row.children.map((child) => child.id)] : [selectedId];
+        requestProjections(ids);
+      }, [selectedId, model, requestProjections]);
 
       const selectRow = React.useCallback(
         (id) => {
@@ -3282,7 +3424,14 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
       const onKeyDown = React.useCallback(
         (event) => {
           const key = event.key;
+          if (event.defaultPrevented) return;
           if (event.metaKey || event.ctrlKey || event.altKey) return;
+          if (isTypingEvent(event)) {
+            // The panel root is the outermost React node: keeping the key here also
+            // stops the Host's window-bubble shortcut dispatch while typing.
+            stopTypingKeys(event);
+            return;
+          }
           if (key === 'j' || key === 'ArrowDown') {
             event.preventDefault();
             move(1);
@@ -3339,11 +3488,15 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
         workspaceNames.push(name);
       }
 
+      const themeChoice = settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system';
+      const tone = themeChoice === 'system' ? (hostDark ? 'dark' : 'light') : themeChoice;
+
       return h(
         'div',
         {
           ref: rootRef,
           className: `mc-root${quiet ? ' mc-quiet' : ''}`,
+          'data-tone': tone,
           tabIndex: 0,
           onKeyDown,
           role: 'region',
@@ -3397,10 +3550,11 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                 'aria-label': t('search'),
                 onChange: (event) => setQuery(event.target.value),
                 onKeyDown: (event) => {
+                  stopTypingKeys(event);
+                  if (isImeComposing(event)) return;
                   if (event.key === 'Escape') {
                     setQuery('');
                     event.currentTarget.blur();
-                    event.stopPropagation();
                   }
                 },
               }),
@@ -3468,6 +3622,7 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
                       onAsk: props.askSession,
                       onRename: props.renameSession,
                       onTrail: props.readSessionTrail,
+                      onOpenNativeTrail: props.openNativeTrail,
                     }),
         ),
         selected
@@ -3646,6 +3801,43 @@ html[data-platform=darwin] .mc-previewHead{padding-top:calc(9px + var(--dsh-fram
             return session.rename(title);
           });
           return remoteValue(result);
+        },
+        /**
+         * Open the Host's native Trajectory tab for one session (best effort): the view
+         * tab choice lives in the conversation store's persisted preference, and there is
+         * no public "select a view" API, so we set that preference then reveal the session.
+         */
+        openNativeTrail: (sessionId) => {
+          const config = typeof ctx.get === 'function' ? ctx.get('configForms') : undefined;
+          const enabled = !!(config && config.developerTools && typeof config.developerTools.enabled.getSnapshot === 'function' && config.developerTools.enabled.getSnapshot());
+          if (!enabled) return { ok: false, reason: 'devtools-off' };
+          try {
+            if (typeof window === 'undefined' || !window.localStorage) return { ok: false, reason: 'storage' };
+            const key = `dsh.conversation.${sessionId}`;
+            const previous = window.localStorage.getItem(key);
+            let parsed = null;
+            try {
+              parsed = previous ? JSON.parse(previous) : null;
+            } catch {
+              parsed = null;
+            }
+            const base = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+            const next = Object.assign({ draft: { text: '', references: [] }, viewRequest: null }, base, { view: 'trajectory' });
+            window.localStorage.setItem(key, JSON.stringify(next));
+          } catch {
+            return { ok: false, reason: 'storage' };
+          }
+          const workspace = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined;
+          if (workspace && typeof workspace.openSession === 'function') {
+            workspace.openSession(sessionId);
+            return { ok: true, bestEffort: true };
+          }
+          try {
+            ctx.layout.selectPanel(null);
+          } catch {
+            /* the shell may refuse; the caller falls back to the in-panel trail */
+          }
+          return { ok: true, bestEffort: true };
         },
         /** Compact recent-work trail from the session's already-loaded event window. */
         readSessionTrail: async (sessionId) => {

@@ -1,6 +1,6 @@
 # STATUS — Command Centre
 
-> 最后更新：2026-10-28 · v0.9.3（画布端点智能选边 + 圆角节点 + 节点右键菜单/继续对话/工作轨迹/改名）。
+> 最后更新：2026-10-28 · v0.9.4（输入框按键隔离/IME + 主题切换 + 懒加载投影；性能结论）。
 
 ## 现在是什么状态
 
@@ -49,6 +49,18 @@
     ⑤ 工作轨迹 = 折叠已加载的 `eventSource` 窗口（turn/tool/回答/交付/错误，最多 40 行），
     冷会话可读、不唤醒 Agent，仅覆盖最近窗口；
     ⑥ 冒烟补：菜单开关、composer 发送/幂等 id、改名、轨迹折叠与渲染
+  - `v0.9.4` ① **输入框按键隔离**：`.mc-root` 的 j/k/o/v/f/s/0// 单键快捷键此前不区分焦点，
+    在我们自己的搜索框/composer 里打字会误触发（用户报的"下一个/上一个对话"其实就是插件自己的 j/k）；
+    现在面板 handler 检查 `defaultPrevented` + 可编辑目标 + IME，输入框对无修饰键的按键做 `stopPropagation`
+    （宿主 dispatch 在 window bubble，晚于我们的 handler）；React 合成事件没有 `isComposing`，
+    统一用 `nativeEvent.isComposing || keyCode===229`；
+    ② **主题设置**：设置里加 跟随系统 / 亮 / 暗，用 `data-tone` 驱动（不再依赖 `body[data-ds-dark-theme]`），
+    暗色单独覆盖 `--dsw-alias-*` token，强制亮/暗都不漏宿主色；
+    ③ **懒加载投影**（性能）：面板打开时只预热前 8 个会话 + 选中节点及其子节点，不再一次刷 80 个；
+    ④ **轨迹优先复用原生**：右键「查看工作轨迹」先走宿主原生 `conversation.view` 的 `trajectory` 标签
+    （best-effort：写该会话的持久化 view 偏好 `localStorage["dsh.conversation.<id>"].view='trajectory'` 再 `uiWorkspace.openSession`；
+    没有公开"选视图"API）；不可用时退化为面板内紧凑轨迹并在底部提示怎么开启「显示代码工作视图」；
+    ⑤ 实测结论见下表「性能」行
 
 ## 关键结论 / 踩过的坑
 
@@ -56,8 +68,10 @@
 |---|---|
 | 面板挂载 | `main`（`key: 'mission'`）+ `sidebar.panellist`（`id: 'mission'`）必须逐字相同；避开 `conversation`/`plugins`/`schedules` |
 | 快捷键 | `⌘P` 被 `workspace.files` 占用且冲突会被拒绝 → 用 `⌘⇧P`；`⌘B`/`⌘T`/`⌘,`/`⌘/`/`` ⌘` ``/`⌘⌥B`/`⌘⌥O` 也已占用 |
+| 快捷键不能吞输入 | 宿主 dispatch 在 window **bubble**、且无 per-element opt-out；插件输入框必须在自己的 handler 里对无修饰键 `stopPropagation`（preventDefault 会吃掉字符，capture `stopImmediatePropagation` 会连自己的 handler 一起废掉） |
 | 快捷键注册是**全平台预校验** | `register()` 会校验 desktop/web × macOS/Windows/Linux 的所有默认键位，任一平台非法就整条命令失败（不注册、不报错）。Web+Linux 只允许 `⌘/`、`⌘⇧,`、`⌘⇧.` → 插件必须省略 `web:linux` 默认值；注册失败要 `console.warn`，不能静默吞掉 |
 | macOS 标题遮挡 | header 用 `--dsh-frame-top-clearance`（48px）；侧栏收起时再加 `--dsh-frame-leading-clearance`（160px） |
+| 性能（2026-10-28 实测） | 面板不在前台时**卸载**（keyed `main` slot）→ 聊天时无本插件渲染/定时器/监听/CSS；Host 投影 0.13µs/事件（75 会话全量 fold 7.9ms，状态 47KB）；打开面板才有的成本 = 冷会话投影读取（v0.9.4 已从 80 → 8+选中）；聊天卡顿的嫌疑在宿主自身（Lexical composer + shortcut 适配器每按键 `querySelectorAll`），不是本插件 |
 | 暗色判定 | 宿主在 **`body[data-ds-dark-theme]`** 上切暗色，不是 html |
 | pnpm 安装 | 本地目录是**硬链接**：原地改文件自动同步；**删了重建会断链**（`ln -f` 修回）；重装用 `link:` 更省事 |
 | Host half | `index.js` 改动必须重启 App 才会加载新模块；纯 Client 改动 `⌘R` 即可 |
@@ -77,6 +91,10 @@ Client 用它做产出列（`2F`/`TXT`/`ERR`）、抽屉「文件区 + 对话区
 
 ## 下一步候选
 
+0. **从画布/看板进对话后的「返回」**（用户 2026-10-28 指定为下一个 feat）：现在跳进 Conversation 后只能靠 `⌘⇧P`
+   或侧栏图标回来。计划：进入前记住来源（panel + 选中节点/滚动位置），在 Conversation 里挂一个轻量「← 回指挥台」
+   徽标（需要找一个宿主允许插的槽位：右侧栏/会话头部/浮层），点击回 `mission` 面板并恢复到原来选中的节点；
+   需要先确认 `slots` 里有没有不带"DO NOT register"警告的会话级槽位（`docs/design/panel-api.md` 有槽位清单）
 1. 画布 P1：节点折叠 `+N`、键盘 DFS 提示、节点内联展开
 2. 产出更准：接 `ctx.workspaceChanges.summary` / `/api/changes.summary` 拿真实 turn 改动
 3. workflow 阶段节点（仍缺 Host 事件投影，需要 fold `tool-workflow/*` 会话事件）
@@ -90,6 +108,9 @@ Client 用它做产出列（`2F`/`TXT`/`ERR`）、抽屉「文件区 + 对话区
 - 不支持拖拽改状态（状态来自宿主投影）
 - 只看所有工作区（Q4「只看当前工作区」缺宿主侧"当前工作区"信号）
 - 工作轨迹只读已加载窗口（tail），不能跳到某条消息（宿主无 anchor 深链）；全量历史要 loadOlder 循环
+- 原生轨迹只能 best-effort 打开：目标会话**当前已挂载**时，内存里的会话 store 会盖掉我们写的持久化偏好（会落在原标签），
+  此时只能提示用户点对话上方的「轨迹」标签；轨迹视图还受「设置 → 通用 → 显示代码工作视图」门控（默认开）
+- 原生轨迹组件无法嵌进插件面板（trajectory 只导出 apply/inject、slot 有 ownership 检查、规范禁止 require 宿主 Client 包）
 - 改名会 resume 会话（冷会话变 live、拿 writer 锁）；子会话/归档由宿主行为决定
 - 继续对话对 one-shot 子会话/归档会话可能被宿主拒绝，插件只显示错误
 - 没做批准/回答/打断（Q3 只读；V2 动作通道）

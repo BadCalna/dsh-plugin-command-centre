@@ -504,15 +504,24 @@ function expand(node) {
 hookState = [];
 resetHooks();
 const asked = [];
+const openedSessions = [];
+// Effects are stubbed out in this harness, so projection warms never fire here; the
+// lazy-refresh policy is verified by reading the effect (mount warms roots only).
+const refreshed = [];
 const renamed = [];
 const trailReads = [];
+const nativeTrailCalls = [];
+let nativeTrailAllowed = false;
 const panelProps = {
   t: (key) => flatLookup(dictionaries.dicts.zh, String(key)),
   useSessions: (selector) => selector(list),
   useSessionStatus: (selector) => selector(statuses),
   useWorkspaces: (selector) => selector(workspaces),
-  openSession: () => {},
-  refreshProjections: () => Promise.resolve(),
+  openSession: (id) => openedSessions.push(id),
+  refreshProjections: (id) => {
+    refreshed.push(id);
+    return Promise.resolve();
+  },
   deliverToSession: (id, text) => {
     delivered.push({ id, text });
     return Promise.resolve({ accepted: true });
@@ -524,6 +533,12 @@ const panelProps = {
   renameSession: (id, title) => {
     renamed.push({ id, title });
     return Promise.resolve({ title, seq: 9 });
+  },
+  openNativeTrail: (id) => {
+    nativeTrailCalls.push(id);
+    if (!nativeTrailAllowed) return { ok: false, reason: 'devtools-off' };
+    openedSessions.push(id);
+    return { ok: true, bestEffort: true };
   },
   readSessionTrail: (id) => {
     trailReads.push(id);
@@ -576,6 +591,46 @@ assert(closeSettings, 'settings overlay has a close button');
 closeSettings.props.onClick(fakeEvent);
 settingsTree = expandPanel();
 assert(countClass(settingsTree, 'mc-settings') === 0, 'settings overlay closes');
+
+// ---- theme switch (system / light / dark) ----
+let themeTree = expandPanel();
+const rootEl = findFirst(themeTree, (node) => node.props && typeof node.props.className === 'string' && node.props.className.split(/\s+/).includes('mc-root'));
+assert(rootEl, 'panel root rendered');
+assert(rootEl.props['data-tone'] === 'light', 'a light host resolves to the light tone');
+const gearAgain = findFirst(themeTree, (node) => node.type === 'button' && node.children && node.children[0] === '⚙');
+gearAgain.props.onClick(fakeEvent);
+themeTree = expandPanel();
+assert(render(themeTree).includes('跟随系统'), 'settings expose the theme switch');
+const darkButton = findFirst(themeTree, (node) => node.type === 'button' && node.props && node.props['data-testid'] === 'mc-theme-dark');
+assert(darkButton, 'the dark theme button renders');
+darkButton.props.onClick(fakeEvent);
+themeTree = expandPanel();
+const darkRoot = findFirst(themeTree, (node) => node.props && typeof node.props.className === 'string' && node.props.className.split(/\s+/).includes('mc-root'));
+assert(darkRoot.props['data-tone'] === 'dark', 'picking dark forces the dark tone even on a light host');
+const systemButton = findFirst(themeTree, (node) => node.type === 'button' && node.props && node.props['data-testid'] === 'mc-theme-system');
+systemButton.props.onClick(fakeEvent);
+themeTree = expandPanel();
+const systemRoot = findFirst(themeTree, (node) => node.props && typeof node.props.className === 'string' && node.props.className.split(/\s+/).includes('mc-root'));
+assert(systemRoot.props['data-tone'] === 'light', 'system follows the host again');
+const settingsCloseAgain = findFirst(findFirst(themeTree, (node) => node.props && typeof node.props.className === 'string' && node.props.className.includes('mc-settings')), (node) => node.type === 'button' && node.children && node.children[0] === '✕');
+settingsCloseAgain.props.onClick(fakeEvent);
+themeTree = expandPanel();
+
+// ---- typing inside a text field must not fire the panel hotkeys ----
+const hotkeyRoot = findFirst(themeTree, (node) => node.props && typeof node.props.className === 'string' && node.props.className.split(/\s+/).includes('mc-root'));
+const typingEvent = (key, target) => ({ key, keyCode: key.charCodeAt(0), metaKey: false, ctrlKey: false, altKey: false, isComposing: false, target, preventDefault() {}, stopPropagation() {} });
+hotkeyRoot.props.onKeyDown(typingEvent('o', { tagName: 'TEXTAREA' }));
+hotkeyRoot.props.onKeyDown(typingEvent('v', { tagName: 'INPUT', type: 'text' }));
+hotkeyRoot.props.onKeyDown(typingEvent('j', { tagName: 'DIV', isContentEditable: true }));
+assert(openedSessions.length === 0, 'typing in a text field does not trigger panel shortcuts');
+hotkeyRoot.props.onKeyDown(typingEvent('o', { tagName: 'DIV' }));
+assert(openedSessions.length === 1, 'the same key still works when the panel itself has focus');
+const beforeTyping = render(expandPanel());
+const rootForTyping = findFirst(expandPanel(), (node) => node.props && typeof node.props.className === 'string' && node.props.className.split(/\s+/).includes('mc-root'));
+rootForTyping.props.onKeyDown(typingEvent('j', { tagName: 'INPUT', type: 'text' }));
+rootForTyping.props.onKeyDown(typingEvent('v', { tagName: 'TEXTAREA' }));
+rootForTyping.props.onKeyDown(typingEvent('s', { tagName: 'DIV', isContentEditable: true }));
+assert(render(expandPanel()) === beforeTyping, 'typing keys in a text field leave the panel state untouched');
 
 // ---- file preview from the projected file list ----
 let previewTree = expandPanel();
@@ -810,11 +865,31 @@ composerInput.props.onChange({ target: { value: '第 7 页再调一下颜色' } 
 tree = expandPanel();
 const composerSend = findFirst(tree, (node) => node.type === 'button' && node.children && node.children[0] === '发送');
 assert(composerSend, 'the composer has a send button');
-composerSend.props.onClick(fakeEvent);
+const composerTextarea = findFirst(tree, (node) => node.type === 'textarea');
+const composerKey = (composing) => ({
+  key: 'Enter',
+  keyCode: composing ? 229 : 13,
+  shiftKey: false,
+  metaKey: false,
+  ctrlKey: false,
+  altKey: false,
+  preventDefault() {},
+  stopPropagation() {},
+  nativeEvent: { isComposing: composing, keyCode: composing ? 229 : 13, target: { tagName: 'TEXTAREA' } },
+});
+composerTextarea.props.onKeyDown(composerKey(true));
+assert(asked.length === 0, 'Enter while the IME is composing does not submit');
+composerTextarea.props.onKeyDown(composerKey(false));
 
 // The preview reads through a promise: settle it before the last assertions.
 (async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // PageProps native opener: with no configForms service the tab is unavailable, so the
+  // caller falls back to the in-panel trail instead of claiming success.
+  const nativePageProps = main.options.inject();
+  const nativeOpening = nativePageProps.openNativeTrail('a');
+  assert(nativeOpening && nativeOpening.ok === false && nativeOpening.reason === 'devtools-off', 'native trail reports devtools-off when the gate is closed');
 
   // pageProps: the host-facing rename + trail implementations
   const hostProps = main.options.inject();
@@ -878,6 +953,32 @@ renameSend.props.onClick(fakeEvent);
   assert(afterTrail.includes('write · /w/deck.mjs') && afterTrail.includes('deck.pptx'), 'the trail renders tool and delivery rows');
   assert(renamed.length === 1 && renamed[0].id === 'a' && renamed[0].title === '修复登录超时 · 回归', 'rename sends the new title to the host');
   assert(render(expandPanel()).includes('标题已更新'), 'rename reports success');
+
+  const previousTrail = findFirst(tree, (node) => node.props && node.props.className === 'mc-trail');
+  if (previousTrail) {
+    const closeTrail = findFirst(previousTrail, (node) => node.type === 'button' && node.children && node.children[0] === '✕');
+    closeTrail.props.onClick(fakeEvent);
+    tree = expandPanel();
+    assert(countClass(tree, 'mc-trail') === 0, 'the in-panel trail closes again');
+  }
+  nativeTrailAllowed = true;
+  const openedBefore = openedSessions.length;
+  const canvasForNative = canvasElement(tree);
+  canvasForNative.props.onContextMenu({
+    preventDefault() {},
+    clientX: 120,
+    clientY: 140,
+    target: { closest: (selector) => (selector === '.mc-node' ? { getAttribute: () => 'a' } : null) },
+  });
+  tree = expandPanel();
+  const nativeItem = menuButton('查看工作轨迹');
+  assert(nativeItem, 'the menu offers the work trail');
+  nativeItem.props.onClick(fakeEvent);
+  tree = expandPanel();
+  assert(countClass(tree, 'mc-trail') === 0, 'the native Trajectory tab is preferred over the in-panel trail');
+  assert(openedSessions.length === openedBefore + 1, 'the native branch opens the conversation');
+  assert(nativeTrailCalls.includes('a'), 'the native opener was asked for the right-clicked node');
+  nativeTrailAllowed = false;
 
   // Preview remotes: unwrap the RemoteResult envelope, error codes surface, and
   // "open on desktop" resolves the workspace-relative path through stat first.
